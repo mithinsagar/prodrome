@@ -1,0 +1,15 @@
+# Committed on purpose: the target is a file path inside the repo, not a
+# credential, so pinning it here makes `dbt build` work identically on a laptop
+# and in CI with no setup step.
+prodrome:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "../data/warehouse/prodrome.duckdb"
+      threads: 4
+      # Extensions are not needed: every model is plain SQL over local tables.
+    ci:
+      type: duckdb
+      path: "../data/warehouse/prodrome.duckdb"
+      threads: 2

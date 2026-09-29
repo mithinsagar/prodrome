@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: prodrome
+    description: >
+      Tables written by the Python pipeline. dbt treats these as sources rather
+      than seeds because they are produced by code that needs scipy -- the
+      gamma-Poisson MLE and the gamma posterior quantiles behind EB05 have no SQL
+      expression. The division of labour is deliberate: statistics in Python,
+      set-based reshaping and quality tests in dbt.
+    schema: main
+    tables:
+      - name: runs
+        description: One row per pipeline run, with its config digest and traffic.
+        columns:
+          - name: run_id
+            tests: [unique, not_null]
+      - name: raw_cohort
+        description: The cohort as it stood for a run, snapshotted.
+      - name: raw_contingency
+        description: Point-in-time 2x2 cells. The central fact table.
+      - name: raw_label_version
+        description: Reconstructed SPL version timeline per drug.
+      - name: raw_label_mention
+        description: Per-version verdicts on whether a reaction is described.
+      - name: raw_quarterly_reports
+        description: New reports per quarter per pair, for spike detection.
+      - name: raw_reporter_mix
+        description: Country and reporter-qualification breakdowns.
+      - name: raw_gps_prior
+        description: Per-quarter fitted gamma-Poisson prior.
+      - name: raw_empirical_null
+        description: Per-quarter fitted empirical null.
+      - name: stat_disproportionality
+        description: Every estimator and criterion flag, per pair per quarter.
+      - name: stat_pair_outcome
+        description: Signal onset, label onset, lead time and censoring status.
+      - name: stat_leakage
+        description: Point-in-time versus retrospective statistics.
+      - name: stat_diagnostics
+        description: Artefact indicators per pair.
+      - name: model_survival_curve
+      - name: model_survival_points
+      - name: model_hazard_report
+      - name: model_hazard_coefficient
+      - name: model_calibration
+      - name: model_priority_queue

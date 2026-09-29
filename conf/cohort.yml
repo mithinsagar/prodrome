@@ -1,0 +1,538 @@
+# Tracked cohort, resolved by tools/resolve_cohort.py and committed for review.
+#
+# `unii` is FDA's substance identifier and is the join key for adverse events:
+# openFDA's own name harmonisation is unreliable (Ozempic's reports carry
+# generic_name = "ORAL SEMAGLUTIDE" for a subcutaneous injection), so names are
+# never used to join.
+#
+# `spl_set_id` must be the *application holder's* label. Repackager set ids carry
+# a single version and would make a drug look as though its label never changed,
+# turning every real label change into a false negative in the outcome variable.
+# The resolver ranks by revision count precisely because only the application
+# holder revises a label.
+#
+# Regenerate with:  python tools/resolve_cohort.py --show-rejected
+cohort:
+- unii: 53AXN4NNHX
+  name: Semaglutide
+  spl_set_id: adec4fd2-6858-4c99-91d4-531f5f2a2d79
+  substance_names:
+  - SEMAGLUTIDE
+  brand_names:
+  - OZEMPIC
+  unii_coverage: 0.726
+  notes: NOVO NORDISK PHARMACEUTICAL INDUSTRIES, LP; 20 label revisions; 100,551 FAERS reports; UNII harmonisation
+    covers only 73% of them, so name matching carries this drug
+- unii: OYN3CCI6QE
+  name: Tirzepatide
+  spl_set_id: 487cd7e7-434c-4925-99fa-aa80b1cc776b
+  substance_names:
+  - TIRZEPATIDE
+  brand_names:
+  - ZEPBOUND
+  unii_coverage: 1.0
+  notes: ELI LILLY AND COMPANY; 40 label revisions; 160,663 FAERS reports
+- unii: WTT295HSY5
+  name: Dulaglutide
+  spl_set_id: 463050bd-2b1c-40f5-b3c3-0a04bb433309
+  substance_names:
+  - DULAGLUTIDE
+  brand_names:
+  - TRULICITY
+  unii_coverage: 0.9986
+  notes: ELI LILLY AND COMPANY; 62 label revisions; 88,282 FAERS reports
+- unii: 839I73S42A
+  name: Liraglutide
+  spl_set_id: 5a9ef4ea-c76a-4d34-a604-27c5b505f5a4
+  substance_names:
+  - LIRAGLUTIDE
+  brand_names:
+  - VICTOZA
+  unii_coverage: 0.9944
+  notes: NOVO NORDISK; 31 label revisions; 50,991 FAERS reports
+- unii: 9P1872D4OL
+  name: Exenatide
+  spl_set_id: 53d03c03-ebf7-418d-88a8-533eabd2ee4f
+  substance_names:
+  - EXENATIDE
+  brand_names:
+  - BYETTA
+  unii_coverage: 0.666
+  notes: ASTRAZENECA PHARMACEUTICALS LP; 26 label revisions; 78,545 FAERS reports; UNII harmonisation
+    covers only 67% of them, so name matching carries this drug
+- unii: HDC1R2M35U
+  name: Empagliflozin
+  spl_set_id: faf3dd6a-9cd0-39c2-0d2e-232cb3f67565
+  substance_names:
+  - EMPAGLIFLOZIN
+  brand_names:
+  - JARDIANCE
+  unii_coverage: 0.995
+  notes: BOEHRINGER INGELHEIM PHARMACEUTICALS, INC.; 31 label revisions; 72,517 FAERS reports
+- unii: 887K2391VH
+  name: Dapagliflozin Propanediol
+  spl_set_id: 72ad22ae-efe6-4cd6-a302-98aaee423d69
+  substance_names:
+  - DAPAGLIFLOZIN
+  - DAPAGLIFLOZIN PROPANEDIOL
+  brand_names:
+  - FARXIGA
+  unii_coverage: 0.8941
+  notes: ASTRAZENECA PHARMACEUTICALS LP; 49 label revisions; 67,209 FAERS reports; UNII harmonisation
+    covers only 89% of them, so name matching carries this drug
+- unii: 786Z46389E
+  name: Canagliflozin
+  spl_set_id: 6868666b-c25e-40d1-9d1f-306bbe9390c1
+  substance_names:
+  - CANAGLIFLOZIN
+  brand_names:
+  - INVOKAMET
+  unii_coverage: 0.9536
+  notes: JANSSEN PHARMACEUTICALS, INC.; 32 label revisions; 460,527 FAERS reports; combination product
+    (2 active ingredients)
+- unii: O1FF4DIV0D
+  name: Tofacitinib Citrate
+  spl_set_id: cf74ba2f-afc5-4baa-8594-979c889a5831
+  substance_names:
+  - TOFACITINIB
+  - TOFACITINIB CITRATE
+  brand_names:
+  - XELJANZ
+  unii_coverage: 0.9997
+  notes: PFIZER LABORATORIES DIV PFIZER INC; 55 label revisions; 186,795 FAERS reports
+- unii: ISP4442I3Y
+  name: Baricitinib
+  spl_set_id: 866e9f35-9035-4581-a4b1-75a621ab55cf
+  substance_names:
+  - BARICITINIB
+  brand_names:
+  - OLUMIANT
+  unii_coverage: 0.9947
+  notes: ELI LILLY AND COMPANY; 30 label revisions; 9,636 FAERS reports
+- unii: 4RA0KN46E0
+  name: Upadacitinib
+  spl_set_id: 2966aec7-2ef0-923c-d8ff-fe1a957bf095
+  substance_names:
+  - UPADACITINIB
+  brand_names:
+  - RINVOQ
+  unii_coverage: 0.9998
+  notes: ABBVIE INC.; 101 label revisions; 81,055 FAERS reports
+- unii: DPT0O3T46P
+  name: Pembrolizumab
+  spl_set_id: 9333c79b-d487-4538-a9f0-71b91a02b287
+  substance_names:
+  - PEMBROLIZUMAB
+  brand_names:
+  - KEYTRUDA
+  unii_coverage: 0.9953
+  notes: MERCK SHARP & DOHME LLC; 228 label revisions; 105,108 FAERS reports
+- unii: 31YO63LBSN
+  name: Nivolumab
+  spl_set_id: f570b9c4-6846-4de2-abfa-4d0a4ae4e394
+  substance_names:
+  - NIVOLUMAB
+  brand_names:
+  - OPDIVO
+  unii_coverage: 0.9938
+  notes: E.R. SQUIBB & SONS, L.L.C.; 68 label revisions; 97,252 FAERS reports
+- unii: 52CMI0WC3Y
+  name: Atezolizumab
+  spl_set_id: 6fa682c9-a312-4932-9831-f286908660ee
+  substance_names:
+  - ATEZOLIZUMAB
+  brand_names:
+  - TECENTRIQ
+  unii_coverage: 0.9921
+  notes: GENENTECH, INC.; 45 label revisions; 38,930 FAERS reports
+- unii: 6T8C155666
+  name: Ipilimumab
+  spl_set_id: 2265ef30-253e-11df-8a39-0800200c9a66
+  substance_names:
+  - IPILIMUMAB
+  brand_names:
+  - YERVOY
+  unii_coverage: 0.9924
+  notes: E.R. SQUIBB & SONS, L.L.C.; 47 label revisions; 43,239 FAERS reports
+- unii: 28X28X9OKV
+  name: Durvalumab
+  spl_set_id: 8baba4ea-2855-42fa-9bd9-5a7548d4cec3
+  substance_names:
+  - DURVALUMAB
+  brand_names:
+  - IMFINZI
+  unii_coverage: 0.936
+  notes: ASTRAZENECA PHARMACEUTICALS LP; 34 label revisions; 21,609 FAERS reports; UNII harmonisation
+    covers only 94% of them, so name matching carries this drug
+- unii: 3Z9Y7UWC1J
+  name: Apixaban
+  spl_set_id: e9481622-7cc6-418a-acb6-c5450daae9b0
+  substance_names:
+  - APIXABAN
+  brand_names:
+  - ELIQUIS
+  unii_coverage: 0.2411
+  notes: E.R. SQUIBB & SONS, L.L.C.; 30 label revisions; 275,953 FAERS reports; UNII harmonisation covers
+    only 24% of them, so name matching carries this drug
+- unii: 9NDF7JZ4M3
+  name: Rivaroxaban
+  spl_set_id: 10db92f9-2300-4a80-836b-673e1ae91610
+  substance_names:
+  - RIVAROXABAN
+  brand_names:
+  - XARELTO
+  unii_coverage: 0.9979
+  notes: JANSSEN PHARMACEUTICALS, INC.; 65 label revisions; 207,376 FAERS reports
+- unii: SC7NUW5IIT
+  name: Dabigatran Etexilate Mesylate
+  spl_set_id: ba74e3cd-b06f-4145-b284-5fd6b84ff3c9
+  substance_names:
+  - DABIGATRAN
+  - DABIGATRAN ETEXILATE
+  - DABIGATRAN ETEXILATE MESYLATE
+  brand_names:
+  - PRADAXA
+  unii_coverage: 0.9598
+  notes: BOEHRINGER INGELHEIM PHARMACEUTICALS INC.; 48 label revisions; 81,707 FAERS reports
+- unii: 32W99UE810
+  name: Edoxaban Tosylate
+  spl_set_id: e77d3400-56ad-11e3-949a-0800200c9a66
+  substance_names:
+  - EDOXABAN
+  - EDOXABAN TOSYLATE
+  brand_names:
+  - SAVAYSA
+  unii_coverage: 0.3936
+  notes: DAIICHI SANKYO INC.; 28 label revisions; 16,747 FAERS reports; UNII harmonisation covers only
+    39% of them, so name matching carries this drug
+- unii: I5I8VB78VT
+  name: Erenumab
+  spl_set_id: b998ed05-94b0-47fd-b28f-cddd1e128fd8
+  substance_names:
+  - ERENUMAB
+  brand_names:
+  - AIMOVIG
+  unii_coverage: 0.9791
+  notes: AMGEN, INC; 25 label revisions; 55,948 FAERS reports
+- unii: 55KHL3P693
+  name: Galcanezumab
+  spl_set_id: 33a147be-233a-40e8-a55e-e40936e28db0
+  substance_names:
+  - GALCANEZUMAB
+  brand_names:
+  - EMGALITY
+  unii_coverage: 0.9823
+  notes: ELI LILLY AND COMPANY; 17 label revisions; 31,874 FAERS reports
+- unii: 1383NM3Q0H
+  name: Rimegepant Sulfate
+  spl_set_id: 9ef08e09-1098-35cc-e053-2a95a90a3e1d
+  substance_names:
+  - RIMEGEPANT
+  - RIMEGEPANT SULFATE
+  brand_names:
+  - NURTEC ODT
+  unii_coverage: 0.9629
+  notes: PFIZER LABORATORIES DIV PFIZER INC; 32 label revisions; 13,084 FAERS reports
+- unii: AD0O8X2QJR
+  name: Ubrogepant
+  spl_set_id: fd9f9458-fd96-4688-be3f-f77b3d1af6ab
+  substance_names:
+  - UBROGEPANT
+  brand_names:
+  - UBRELVY
+  unii_coverage: 0.0
+  notes: ALLERGAN, INC.; 28 label revisions; 6,030 FAERS reports; UNII harmonisation covers only 0% of
+    them, so name matching carries this drug
+- unii: A10SJL62JY
+  name: Ocrelizumab
+  spl_set_id: 9da42362-3bb5-4b83-b4bb-b59fd4e55f0d
+  substance_names:
+  - OCRELIZUMAB
+  brand_names:
+  - OCREVUS
+  unii_coverage: 0.9998
+  notes: GENENTECH, INC.; 24 label revisions; 61,956 FAERS reports
+- unii: 3JB47N2Q2P
+  name: Natalizumab
+  spl_set_id: c5fdde91-1989-4dd2-9129-4f3323ea2962
+  substance_names:
+  - NATALIZUMAB
+  brand_names:
+  - TYSABRI
+  unii_coverage: 1.0
+  notes: BIOGEN INC.; 47 label revisions; 180,852 FAERS reports
+- unii: G926EC510T
+  name: Fingolimod Hydrochloride
+  spl_set_id: cc9e1c8c-0e2b-44e2-878b-27057f786be9
+  substance_names:
+  - FINGOLIMOD
+  - FINGOLIMOD HYDROCHLORIDE
+  brand_names:
+  - GILENYA
+  unii_coverage: 0.9946
+  notes: NOVARTIS PHARMACEUTICALS CORPORATION; 40 label revisions; 86,919 FAERS reports
+- unii: FO2303MNI2
+  name: Dimethyl Fumarate
+  spl_set_id: 665d7e74-036c-5f68-5b67-ab84b9b49151
+  substance_names:
+  - DIMETHYL
+  - DIMETHYL FUMARATE
+  brand_names:
+  - TECFIDERA
+  unii_coverage: 0.9956
+  notes: BIOGEN INC.; 55 label revisions; 122,829 FAERS reports
+- unii: 3A189DH42V
+  name: Alemtuzumab
+  spl_set_id: 6236b0bc-82e9-4447-9a78-f57d94770269
+  substance_names:
+  - ALEMTUZUMAB
+  brand_names:
+  - LEMTRADA
+  unii_coverage: 0.9937
+  notes: GENZYME CORPORATION; 26 label revisions; 19,351 FAERS reports
+- unii: 82VFR53I78
+  name: Aripiprazole
+  spl_set_id: ee49f3b1-1650-47ff-9fb1-ea53fe0b92b6
+  substance_names:
+  - ARIPIPRAZOLE
+  brand_names:
+  - ABILIFY MAINTENA
+  unii_coverage: 0.9397
+  notes: OTSUKA AMERICA PHARMACEUTICAL, INC.; 27 label revisions; 123,423 FAERS reports; UNII harmonisation
+    covers only 94% of them, so name matching carries this drug
+- unii: 2J3YBM1K8C
+  name: Brexpiprazole
+  spl_set_id: 2d301358-6291-4ec1-bd87-37b4ad9bd850
+  substance_names:
+  - BREXPIPRAZOLE
+  brand_names:
+  - REXULTI
+  unii_coverage: 0.9993
+  notes: OTSUKA AMERICA PHARMACEUTICAL, INC.; 26 label revisions; 16,517 FAERS reports
+- unii: O0P4I5851I
+  name: Lurasidone Hydrochloride
+  spl_set_id: afad3051-9df2-4c54-9684-e8262a133af8
+  substance_names:
+  - LURASIDONE
+  - LURASIDONE HYDROCHLORIDE
+  brand_names:
+  - LATUDA
+  unii_coverage: 0.8959
+  notes: SUMITOMO PHARMA AMERICA, INC.; 37 label revisions; 23,221 FAERS reports; UNII harmonisation covers
+    only 90% of them, so name matching carries this drug
+- unii: 5SML1T733B
+  name: Valbenazine Tosylate
+  spl_set_id: 4c970164-cafb-421f-9eb5-c226ef0a3417
+  substance_names:
+  - VALBENAZINE
+  - VALBENAZINE TOSYLATE
+  brand_names:
+  - INGREZZA
+  unii_coverage: 0.9991
+  notes: NEUROCRINE BIOSCIENCES, INC.; 34 label revisions; 25,033 FAERS reports
+- unii: L8P1H35P2Z
+  name: Esketamine Hydrochloride
+  spl_set_id: d81a6a79-a74a-44b7-822c-0dfa3036eaed
+  substance_names:
+  - ESKETAMINE
+  - ESKETAMINE HYDROCHLORIDE
+  brand_names:
+  - SPRAVATO
+  unii_coverage: 0.0
+  notes: JANSSEN PHARMACEUTICALS, INC.; 21 label revisions; 18,678 FAERS reports; UNII harmonisation covers
+    only 0% of them, so name matching carries this drug
+- unii: U1O3J18SFL
+  name: Montelukast Sodium
+  spl_set_id: da038cf6-cfad-43a4-ab8e-d81d028d6087
+  substance_names:
+  - MONTELUKAST
+  - MONTELUKAST SODIUM
+  brand_names: []
+  unii_coverage: 0.9908
+  notes: TORRENT PHARMACEUTICALS LIMITED; 24 label revisions; 176,626 FAERS reports
+- unii: 101V0R1N2E
+  name: Febuxostat
+  spl_set_id: 54de10ef-fe5f-4930-b91d-6bbb04c664bd
+  substance_names:
+  - FEBUXOSTAT
+  brand_names:
+  - ULORIC
+  unii_coverage: 0.7142
+  notes: TAKEDA PHARMACEUTICALS AMERICA, INC.; 17 label revisions; 23,338 FAERS reports; UNII harmonisation
+    covers only 71% of them, so name matching carries this drug
+- unii: 82269ASB48
+  name: Varenicline Tartrate
+  spl_set_id: f0ff4f27-5185-4881-a749-c6b7a0ca5696
+  substance_names:
+  - VARENICLINE
+  - VARENICLINE TARTRATE
+  brand_names:
+  - CHANTIX
+  unii_coverage: 0.9724
+  notes: PFIZER LABORATORIES DIV PFIZER INC; 49 label revisions; 84,869 FAERS reports
+- unii: 8Q2869CNVH
+  name: Hydroxychloroquine Sulfate
+  spl_set_id: 7804f5d2-41a6-4523-a277-6967e984e88e
+  substance_names:
+  - HYDROXYCHLOROQUINE
+  - HYDROXYCHLOROQUINE SULFATE
+  brand_names: []
+  unii_coverage: 0.9682
+  notes: AMNEAL PHARMACEUTICALS NY LLC; 17 label revisions; 156,369 FAERS reports
+- unii: 9N7R477WCK
+  name: Tramadol Hydrochloride
+  spl_set_id: 67919c2c-2f8a-4bbb-bef5-0cd6c1e63a16
+  substance_names:
+  - TRAMADOL
+  - TRAMADOL HYDROCHLORIDE
+  brand_names: []
+  unii_coverage: 0.2026
+  notes: AMNEAL PHARMACEUTICALS NY LLC; 51 label revisions; 189,021 FAERS reports; UNII harmonisation
+    covers only 20% of them, so name matching carries this drug
+- unii: 6CW7F3G59X
+  name: Gabapentin
+  spl_set_id: cff7de45-148b-4e96-88fd-6052bf75b5f7
+  substance_names:
+  - GABAPENTIN
+  brand_names: []
+  unii_coverage: 0.9832
+  notes: MYLAN PHARMACEUTICALS INC.; 37 label revisions; 368,839 FAERS reports
+- unii: 55JG375S6M
+  name: Pregabalin
+  spl_set_id: e48db3c2-7351-41f2-a451-5a8341c4125c
+  substance_names:
+  - PREGABALIN
+  brand_names: []
+  unii_coverage: 0.9897
+  notes: ASCEND LABORATORIES, LLC; 19 label revisions; 273,426 FAERS reports
+- unii: 1X70OSD4VX
+  name: Ibrutinib
+  spl_set_id: 0dfd0279-ff17-4ea9-89be-9803c71bab44
+  substance_names:
+  - IBRUTINIB
+  brand_names:
+  - IMBRUVICA
+  unii_coverage: 0.9981
+  notes: PHARMACYCLICS LLC; 65 label revisions; 80,464 FAERS reports
+- unii: 3C06JJ0Z2O
+  name: Osimertinib
+  spl_set_id: 5e81b4a7-b971-45e1-9c31-29cea8c87ce7
+  substance_names:
+  - OSIMERTINIB
+  brand_names:
+  - TAGRISSO
+  unii_coverage: 0.0
+  notes: ASTRAZENECA PHARMACEUTICALS LP; 37 label revisions; 31,957 FAERS reports; UNII harmonisation
+    covers only 0% of them, so name matching carries this drug
+- unii: G9ZF61LE7G
+  name: Palbociclib
+  spl_set_id: e0e6412f-50b4-4fd4-9364-62818d121a07
+  substance_names:
+  - PALBOCICLIB
+  brand_names:
+  - IBRANCE
+  unii_coverage: 0.9834
+  notes: PFIZER LABORATORIES DIV PFIZER INC; 24 label revisions; 96,429 FAERS reports
+- unii: WOH1JD9AR8
+  name: Olaparib
+  spl_set_id: 741ff3e3-dc1a-45a6-84e5-2481b27131aa
+  substance_names:
+  - OLAPARIB
+  brand_names:
+  - LYNPARZA
+  unii_coverage: 0.9867
+  notes: ASTRAZENECA PHARMACEUTICALS LP; 38 label revisions; 21,078 FAERS reports
+- unii: EE083865G2
+  name: Lenvatinib
+  spl_set_id: f4bedd21-efde-44c6-9d9c-b48b78d7ed1e
+  substance_names:
+  - LENVATINIB
+  brand_names:
+  - LENVIMA
+  unii_coverage: 0.9988
+  notes: EISAI INC.; 80 label revisions; 32,653 FAERS reports
+- unii: FYS6T7F842
+  name: Adalimumab
+  spl_set_id: 608d4f0d-b19f-46d3-749a-7159aa5f933d
+  substance_names:
+  - ADALIMUMAB
+  brand_names:
+  - HUMIRA
+  unii_coverage: 0.0754
+  notes: ABBVIE INC.; 2154 label revisions; 716,520 FAERS reports; UNII harmonisation covers only 8% of
+    them, so name matching carries this drug; combination product (2 active ingredients)
+- unii: FU77B4U5Z0
+  name: Ustekinumab
+  spl_set_id: c77a9664-e3bb-4023-b400-127aa53bca2b
+  substance_names:
+  - USTEKINUMAB
+  brand_names:
+  - STELARA
+  unii_coverage: 0.9994
+  notes: JANSSEN BIOTECH, INC.; 49 label revisions; 102,323 FAERS reports
+- unii: DLG4EML025
+  name: Secukinumab
+  spl_set_id: 77c4b13e-7df3-42d4-81db-3d0cddb7f67a
+  substance_names:
+  - SECUKINUMAB
+  brand_names:
+  - COSENTYX
+  unii_coverage: 0.9946
+  notes: NOVARTIS PHARMACEUTICALS CORPORATION; 30 label revisions; 161,291 FAERS reports
+- unii: 420K487FSG
+  name: Dupilumab
+  spl_set_id: 595f437d-2729-40bb-9c62-c8ece1f82780
+  substance_names:
+  - DUPILUMAB
+  brand_names:
+  - DUPIXENT
+  unii_coverage: 0.9999
+  notes: SANOFI-AVENTIS U.S. LLC; 60 label revisions; 479,035 FAERS reports
+- unii: DE2O63YV8R
+  name: Finerenone
+  spl_set_id: fc726765-5d5a-4d6e-b037-b847bda9fb7c
+  substance_names:
+  - FINERENONE
+  brand_names:
+  - KERENDIA
+  unii_coverage: 1.0
+  notes: BAYER HEALTHCARE PHARMACEUTICALS INC.; 13 label revisions; 2,960 FAERS reports
+- unii: 80M03YXJ7I
+  name: Sacubitril
+  spl_set_id: 000dc81d-ab91-450c-8eae-8eb74e72296f
+  substance_names:
+  - SACUBITRIL
+  brand_names:
+  - ENTRESTO
+  unii_coverage: 0.9988
+  notes: NOVARTIS PHARMACEUTICALS CORPORATION; 25 label revisions; 245,196 FAERS reports; combination
+    product (2 active ingredients)
+- unii: ZU7CF08A1A
+  name: Tafamidis Meglumine
+  spl_set_id: 1b4121ee-a733-4456-a917-be2603477839
+  substance_names:
+  - TAFAMIDIS
+  - TAFAMIDIS MEGLUMINE
+  brand_names:
+  - VYNDAQEL
+  unii_coverage: 0.9988
+  notes: PFIZER LABORATORIES DIV PFIZER INC; 15 label revisions; 16,259 FAERS reports; combination product
+    (2 active ingredients)
+- unii: 1C058IKG3B
+  name: Teriflunomide
+  spl_set_id: 4650d12c-b9c8-4525-b07f-a2d773eca155
+  substance_names:
+  - TERIFLUNOMIDE
+  brand_names:
+  - AUBAGIO
+  unii_coverage: 0.9996
+  notes: GENZYME CORPORATION; 28 label revisions; 44,973 FAERS reports
+- unii: RR6P8L282I
+  name: Siponimod
+  spl_set_id: 44492772-5aed-4627-bd85-e8e89f308bb3
+  substance_names:
+  - SIPONIMOD
+  brand_names:
+  - MAYZENT
+  unii_coverage: 0.9911
+  notes: NOVARTIS PHARMACEUTICALS CORPORATION; 17 label revisions; 8,949 FAERS reports

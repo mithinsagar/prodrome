@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: "prodrome: a signal-to-label latency engine for FDA adverse event data"
+message: "If you use this software or its method, please cite it."
+type: software
+authors:
+  - family-names: "S"
+    given-names: "Mithin Sagar"
+repository-code: "https://github.com/mithinsagar/prodrome"
+license: MIT
+version: 0.1.0
+date-released: "2026-09-29"
+keywords:
+  - pharmacovigilance
+  - disproportionality analysis
+  - signal detection
+  - FAERS
+  - structured product labeling
+  - survival analysis
+abstract: >
+  prodrome measures how much lead time pharmacovigilance signal-detection criteria
+  buy before a drug's label changes. It reconstructs each drug's full labelling
+  history from the DailyMed SPL archive, recomputes disproportionality statistics
+  point-in-time at every quarter boundary using only reports FDA had received by that
+  date, and reports the lead time each published criterion achieved against the label
+  change that followed. It also quantifies the contamination that conventional
+  retrospective analyses incur: because reporting of a reaction rises after it is
+  added to a label, a statistic computed on the full cumulative database is partly
+  caused by the outcome it would be used to predict.

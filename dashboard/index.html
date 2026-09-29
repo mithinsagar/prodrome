@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en-GB" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prodrome — signal-to-label latency</title>
+<meta name="description" content="How much lead time pharmacovigilance signal-detection criteria actually buy before a drug label changes, measured point-in-time on FDA adverse event data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell">
+
+  <header class="masthead">
+    <div class="masthead-top">
+      <div>
+        <h1><span class="mark">prodrome</span> — signal-to-label latency</h1>
+        <p class="tagline">
+          Conventional pharmacovigilance tooling reports which drug–reaction pairs are
+          reported disproportionately. This measures something else: <strong>how much
+          warning each signal-detection criterion actually buys</strong> before the drug
+          label changes — computed point-in-time, so the answer is not contaminated by
+          the labelling event it is trying to predict.
+        </p>
+      </div>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme">◐ theme</button>
+    </div>
+    <div class="manifest" id="manifest"></div>
+  </header>
+
+  <!-- ===================================================== the thesis ==== -->
+  <section id="thesis">
+    <h2>The measurement that motivates this</h2>
+    <p class="section-note">
+      When a reaction is added to a drug's label, reporting of that reaction rises
+      sharply — clinicians who now know to look for it, report it. This is notoriety
+      bias, and it has a specific methodological consequence: a disproportionality
+      statistic computed on the full cumulative database is partly <em>caused</em> by
+      the label change it would be used to predict. Every open FAERS analysis found
+      while building this computes exactly that statistic.
+    </p>
+    <div class="grid grid-hero">
+      <div class="panel">
+        <p class="panel-title">Retrospective inflation</p>
+        <p class="hero-figure" id="hero-inflation">—<span class="hero-unit">×</span></p>
+        <p class="hero-caption">
+          Median ratio of the reporting odds ratio computed on the full database to the
+          value actually available when the label changed. Measured across every pair in
+          the cohort that was eventually labelled.
+        </p>
+      </div>
+      <div class="grid grid-3">
+        <div class="panel">
+          <p class="tile-value" id="tile-gaps">—</p>
+          <p class="tile-label">Open label gaps</p>
+          <p class="tile-sub">disproportionate &amp; not on the label</p>
+        </div>
+        <div class="panel">
+          <p class="tile-value accent" id="tile-lead">—</p>
+          <p class="tile-label">Median lead time</p>
+          <p class="tile-sub" id="tile-lead-sub">quarters, best criterion</p>
+        </div>
+        <div class="panel">
+          <p class="tile-value" id="tile-notorious">—</p>
+          <p class="tile-label">Notoriety-confirmed</p>
+          <p class="tile-sub">reporting &gt;2× after the label change</p>
+        </div>
+        <div class="panel">
+          <p class="tile-value" id="tile-cohort">—</p>
+          <p class="tile-label">Drugs tracked</p>
+          <p class="tile-sub" id="tile-cohort-sub">—</p>
+        </div>
+        <div class="panel">
+          <p class="tile-value" id="tile-lift">—</p>
+          <p class="tile-label">Model lift @50</p>
+          <p class="tile-sub" id="tile-lift-sub">vs. base rate, held out</p>
+        </div>
+        <div class="panel">
+          <p class="tile-value" id="tile-quarters">—</p>
+          <p class="tile-label">Quarters evaluated</p>
+          <p class="tile-sub">each recomputed point-in-time</p>
+        </div>
+      </div>
+    </div>
+    <p class="caveat" id="leakage-caveat"></p>
+  </section>
+
+  <!-- ============================================ criterion comparison ==== -->
+  <section id="criteria">
+    <h2>What each criterion buys, and what it costs</h2>
+    <p class="section-note">
+      Published signal-detection rules disagree about when a signal starts. The
+      interval-based rules fire earlier and noisier; the MHRA triple fires later and
+      cleaner. Whether that trade is worth making is an empirical question about lead
+      time, shown here against the alarm count each rule raises to achieve it.
+      <strong>PRR ≥ 2 with no count or significance gate</strong> is included as a
+      negative control on method — it is what a large share of the published FAERS
+      literature applies.
+    </p>
+    <div class="grid grid-2">
+      <div class="panel">
+        <p class="panel-title">Median quarters from signal to label change</p>
+        <div id="chart-leadtime"></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Cumulative probability of a label change after the signal fires</p>
+        <div class="legend" id="legend-survival"></div>
+        <div id="chart-survival"></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:1.25rem">
+      <p class="panel-title">Criterion detail</p>
+      <div class="table-wrap"><table id="table-criteria">
+        <caption class="sr-only">Signal-detection criteria compared by lead time and alarm count</caption>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ============================================== the priority queue ==== -->
+  <section id="queue">
+    <h2>Open signals, ranked</h2>
+    <p class="section-note">
+      The operational output. Each row is a drug–reaction pair reported
+      disproportionately whose label does not describe it, ranked by the calibrated
+      probability of a label change within eight quarters — fitted on a strictly earlier
+      period, so the ranking is prospective by construction. Artefact flags are shown
+      inline: a signal driven by litigation-sourced reporting and one accumulated
+      steadily across many countries are not the same finding.
+    </p>
+    <div class="controls">
+      <div class="control">
+        <label for="filter-drug">Drug</label>
+        <select id="filter-drug"><option value="">All drugs</option></select>
+      </div>
+      <div class="control">
+        <label for="filter-artefact">Reporting pattern</label>
+        <select id="filter-artefact">
+          <option value="">All</option>
+          <option value="clean">No artefact flag</option>
+          <option value="flagged">Flagged only</option>
+        </select>
+      </div>
+      <div class="control">
+        <label for="filter-min-reports">Minimum reports</label>
+        <input type="number" id="filter-min-reports" min="1" step="1" value="3">
+      </div>
+    </div>
+    <div class="panel">
+      <div class="table-wrap"><table id="table-queue">
+        <caption class="sr-only">Open label gaps ranked by modelled probability of a label change</caption>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ==================================================== drill-down ====== -->
+  <section id="trend">
+    <h2>Point-in-time trajectory</h2>
+    <p class="section-note">
+      A single pair's disproportionality as it was computable at each quarter end, using
+      only reports FDA had received by that date. Where a label change was detected, it
+      is marked — the gap between the first firing and that marker is the lead time this
+      project measures.
+    </p>
+    <div class="controls">
+      <div class="control">
+        <label for="select-pair">Drug and reaction</label>
+        <select id="select-pair"></select>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="legend" id="legend-trend"></div>
+      <div id="chart-trend"></div>
+    </div>
+  </section>
+
+  <!-- ============================================== model validation ====== -->
+  <section id="model">
+    <h2>Does the prioritisation model actually work</h2>
+    <p class="section-note">
+      A ranking is only useful if its probabilities mean something and its order beats
+      chance. Both are shown on the held-out period. The split is temporal, not random:
+      a random split would put later quarters of the same pair in training and earlier
+      ones in test, and let the model calibrate against an era it should not have seen.
+    </p>
+    <div class="grid grid-2">
+      <div class="panel">
+        <p class="panel-title">Calibration — predicted vs observed label-change rate</p>
+        <div class="legend" id="legend-calibration"></div>
+        <div id="chart-calibration"></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">What the model weights</p>
+        <div id="chart-coefficients"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= drugs ====== -->
+  <section id="drugs">
+    <h2>Cohort</h2>
+    <p class="section-note">
+      Fifty-five drugs chosen because their labels have <em>moved</em> — each is either a
+      product whose safety labelling demonstrably changed since 2016 or a recent approval
+      under active surveillance, so the outcome variable has both events and genuine
+      right-censored observations. <strong>UNII coverage</strong> is the measured share of
+      a drug's reports that openFDA harmonised to a substance identifier; where it is
+      low, that drug's reports are found by reporter-supplied name instead, and its
+      figures should be read accordingly.
+    </p>
+    <div class="panel">
+      <div class="table-wrap"><table id="table-drugs">
+        <caption class="sr-only">Tracked drugs with label history and signal counts</caption>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ======================================================= method ======= -->
+  <section id="method">
+    <h2>Method and limits</h2>
+    <details class="method">
+      <summary>How a label gap is decided</summary>
+      <div>
+        <p>Each archived label version is parsed into its LOINC-coded sections, and only
+        the primary safety sections count as evidence: <code>boxed warning</code>,
+        <code>contraindications</code>, <code>warnings and precautions</code>,
+        <code>adverse reactions</code>. <code>Clinical studies</code> is excluded
+        deliberately — it runs to 18,000 characters on a typical label and names dozens
+        of adverse events as trial outcomes, so matching against it would mark almost
+        every reaction as already labelled. <code>Indications</code> is excluded because
+        therapeutic goals collide with adverse events: "weight decreased" is both, for
+        a GLP-1 agonist.</p>
+        <p>Matching runs lexically first — MedDRA uses British spellings and US labels use
+        American, so "diarrhoea" against "diarrhea" and "ischaemic" against "ischemic"
+        are handled by rule rather than by model — then semantically for the residue, such
+        as "intestinal obstruction" against "blockage of the bowel". The semantic layer
+        uses a per-label empirical null rather than a fixed cosine threshold: measured on
+        real labels, raw cosine similarities cluster near 0.62 with a standard deviation
+        of 0.04, so any fixed cutoff either admits nonsense or rejects genuine
+        paraphrase.</p>
+      </div>
+    </details>
+    <details class="method" style="margin-top:0.75rem">
+      <summary>What this cannot tell you</summary>
+      <div>
+        <p><strong>These are reporting associations, not risks.</strong> FAERS has no
+        denominator, no control group, and no verification of causality. A
+        disproportionate ratio is a hypothesis to evaluate, never evidence that a drug
+        caused a reaction.</p>
+        <p><strong>A label change is a proxy outcome.</strong> It reflects FDA's
+        assessment of accumulated evidence from many sources, most of them not FAERS.
+        Predicting it is useful for prioritising review; it is not the same as predicting
+        whether an association is real.</p>
+        <p><strong>Left truncation is excluded, not solved.</strong> Reactions already
+        described in a drug's earliest archived label version have an unknowable addition
+        date and are dropped from the time-to-event analysis. The count of such pairs is
+        reported alongside every result.</p>
+        <p><strong>MedDRA's hierarchy is licensed</strong> and cannot be redistributed, so
+        there is no System Organ Class grouping here and the clinical synonym table is
+        hand-built and incomplete. Reaction term strings themselves come from public FAERS
+        records.</p>
+        <p><strong>Only a drug's most-reported reactions are evaluated</strong>, capped per
+        drug to stay inside a free API quota. The long tail is a matter of request budget,
+        not of method.</p>
+      </div>
+    </details>
+  </section>
+
+  <footer class="colophon">
+    <p>
+      Built on the <a href="https://open.fda.gov/">openFDA</a> adverse event API and
+      <a href="https://dailymed.nlm.nih.gov/">DailyMed</a>'s Structured Product Label
+      archive — both public, both free. Source and full methodology at
+      <a href="https://github.com/mithinsagar/prodrome">github.com/mithinsagar/prodrome</a>.
+    </p>
+    <p>
+      Not for clinical use. openFDA data is unvalidated and must not be used to make
+      decisions about medical care.
+    </p>
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

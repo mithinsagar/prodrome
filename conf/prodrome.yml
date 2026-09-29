@@ -1,0 +1,67 @@
+# prodrome analysis plan.
+#
+# Everything that changes what the numbers mean lives here, under version
+# control, so a published result can be traced to the configuration that
+# produced it. Credentials live in the environment; see .env.example.
+
+include:
+  - cohort.yml
+  - negative_controls.yml
+
+window:
+  # FAERS in its modern form begins in 2004, but report volume before 2014 is
+  # thin enough that quarterly disproportionality is unstable. The window starts
+  # where the cohort's first approvals are, and the cumulative counts behind each
+  # quarter still reach back to 2004 -- only the *evaluation* grid starts here.
+  first_quarter: "2015Q1"
+  # "auto" resolves to the last fully closed quarter in openFDA's index, so the
+  # final point is never a partially populated stub.
+  last_quarter: auto
+
+http:
+  # openFDA permits 240/minute. 120 leaves headroom for a local run overlapping
+  # with a scheduled one without triggering a 429 storm.
+  requests_per_minute: 120
+  timeout_seconds: 60.0
+  # openFDA's drug/event index was observed returning intermittent 500s on
+  # roughly 40% of requests while its other indexes stayed healthy. Nine
+  # attempts with jittered exponential backoff bring the per-request loss
+  # probability under 0.1%; responses are cached, so a re-run costs only what
+  # still has not succeeded.
+  # openFDA's drug/event index was observed returning intermittent 500s on roughly
+  # 40% of requests while drug/label, device/event and food/enforcement stayed
+  # healthy. Nine attempts with jittered exponential backoff bring the per-request
+  # loss probability under 0.1%; responses are cached on disk, so a re-run costs
+  # only what has not already succeeded.
+  max_retries: 8
+  backoff_base_seconds: 2.0
+  max_sleep_seconds: 45.0
+
+# Reactions are discovered per drug from its own most-reported terms, capped so
+# one enormous drug cannot consume the whole request budget.
+max_reactions_per_drug: 60
+min_reaction_reports: 5
+
+labelmatch:
+  # "hashed" is deterministic and dependency-free, and is what CI uses so the
+  # suite never downloads a model. "onnx" runs a real local embedding model via
+  # the `embed` extra; it is what the published figures use.
+  embed_backend: null          # null -> take it from PRODROME_EMBED_BACKEND
+  onnx_model: BAAI/bge-small-en-v1.5
+  # Calibrated against the hand-adjudicated pairs in conf/adjudicated.yml.
+  # Re-derive with: prodrome labelmatch calibrate
+  similarity_threshold: 0.62
+  chunk_sentences: 3
+  chunk_stride: 2
+  top_k: 5
+
+latency:
+  # A pair counts as "labelled in time" if the label mentions it within this many
+  # quarters of the signal first firing. Eight quarters is two years, which is
+  # the horizon regulators themselves work to for routine signal evaluation.
+  horizon_quarters: 8
+  # Everything from this quarter on is held out. The split is temporal, not
+  # random: a random split would let the model learn from the future of the very
+  # pairs it is scored on.
+  holdout_from_quarter: "2023Q1"
+  min_case_count: 3

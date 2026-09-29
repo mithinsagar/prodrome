@@ -1,0 +1,150 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prodrome"
+version = "0.1.0"
+description = "Signal-to-label latency engine: measures how much lead time pharmacovigilance signal-detection criteria actually buy, point-in-time and leakage-free"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "Mithin Sagar S" }]
+keywords = [
+  "pharmacovigilance",
+  "disproportionality",
+  "signal-detection",
+  "faers",
+  "openfda",
+  "structured-product-labeling",
+  "survival-analysis",
+  "data-engineering",
+]
+classifiers = [
+  "Intended Audience :: Healthcare Industry",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Database",
+]
+
+dependencies = [
+  "httpx>=0.28,<1",
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.6,<3",
+  "pyyaml>=6.0.2,<7",
+  "typer>=0.15,<1",
+  "rich>=13.9,<15",
+  "duckdb>=1.1,<2",
+  "pyarrow>=18,<26",
+  "numpy>=1.26,<3",
+  "scipy>=1.14,<2",
+  "pandas>=2.2,<3",
+  "scikit-learn>=1.5,<2",
+  "lifelines>=0.29,<1",
+]
+
+[project.optional-dependencies]
+# Local ONNX embeddings. Kept optional so CI and a bare clone stay lightweight;
+# the lexical + hashed-vector backends make the pipeline runnable without it.
+embed = ["fastembed>=0.4,<1", "faiss-cpu>=1.9,<2"]
+# dbt is a separate resolver universe from the library; installing it alongside
+# the app pins can conflict, so it gets its own extra and its own CI job.
+dbt = ["dbt-core>=1.8,<2", "dbt-duckdb>=1.8,<2"]
+# Native Tableau extract writing.
+tableau = ["pantab>=5,<6"]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "respx>=0.22,<1",
+  "ruff>=0.8,<1",
+  "mypy>=1.13,<2",
+  "types-PyYAML>=6.0.12",
+  "pandas-stubs>=2.2",
+]
+
+[project.scripts]
+prodrome = "prodrome.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/mithinsagar/prodrome"
+Documentation = "https://github.com/mithinsagar/prodrome/tree/main/docs"
+Dashboard = "https://mithinsagar.github.io/prodrome/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prodrome"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "TCH", "PTH", "RET", "ARG", "PL", "RUF", "S", "NPY"]
+ignore = [
+  # Statistical constructors and row builders legitimately take many parameters.
+  # Splitting a 2x2 table or a diagnostics record into sub-objects to satisfy a
+  # count would obscure rather than clarify.
+  "PLR0913",
+  "PLR0917",
+  # assert documents internal invariants, and is the idiom in tests.
+  "S101",
+  # ClassVar annotations are not required for simple module-level constants.
+  "RUF012",
+  # Named thresholds live in the criteria registry and in documented module
+  # constants, which is exactly where a magic-number ban would push them.
+  "PLR2004",
+  # Imports are deferred deliberately, in two patterns: optional extras
+  # (fastembed, faiss, pantab) must not be required at import time, and the heavy
+  # scientific imports (lifelines, sklearn, scipy sub-modules) are kept out of
+  # module scope so the CLI starts quickly. The rule would only produce noqa noise.
+  "PLC0415",
+  # Typing-only imports are kept at runtime rather than moved into TYPE_CHECKING
+  # blocks: pydantic resolves annotations at runtime, and splitting each import
+  # list in two makes the modules harder to read for no runtime gain.
+  "TC001", "TC002", "TC003",
+  # SQL identifiers are interpolated only from this repository's own schema and
+  # from information_schema (see Warehouse.find_table); values are always bound
+  # parameters. No user input reaches an f-string SQL fragment.
+  "S608",
+  # Typographic characters are deliberate in prose: the multiplication sign in
+  # "4.02x", en and em dashes, and Greek letters in statistical notation.
+  "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG001", "ARG002", "PLC0415", "S105", "S106"]
+"src/prodrome/stats/**" = ["N803", "N806"]  # a, b, c, d and E follow the epidemiology literature
+
+[tool.ruff.lint.isort]
+known-first-party = ["prodrome"]
+
+[tool.mypy]
+# 3.12, not the 3.11 floor of requires-python: numpy's bundled stubs use `type`
+# statements, which mypy rejects when told to assume 3.11, and the failure prevents
+# any further checking. Runtime support for 3.11 is verified by the test matrix
+# instead, which is the right tool for it.
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = []
+
+[[tool.mypy.overrides]]
+module = [
+  "duckdb.*", "lifelines.*", "fastembed.*", "faiss.*", "pantab.*",
+  "sklearn.*", "scipy.*", "pyarrow.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+  "network: hits live public APIs; deselect with -m 'not network'",
+  "slow: takes more than a few seconds",
+]
+
+[tool.coverage.run]
+source = ["src/prodrome"]
+branch = true

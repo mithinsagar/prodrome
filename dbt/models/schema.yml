@@ -1,0 +1,199 @@
+version: 2
+
+models:
+  # ---------------------------------------------------------------- staging ---
+  - name: stg_cohort
+    description: The tracked cohort for this run, with identification provenance.
+    columns:
+      - name: drug_unii
+        description: FDA substance identifier. The join key for adverse events.
+        tests:
+          - unique
+          - not_null
+      - name: unii_coverage
+        description: >
+          Measured share of this drug's reports that openFDA harmonised to a UNII.
+          Not tested for a floor: 0.0 is a real, measured value for several drugs
+          (osimertinib, esketamine, ubrogepant) and is exactly why the union
+          selector exists. Asserting it must be high would fail on correct data.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+              config: {severity: warn}
+
+  - name: stg_contingency
+    description: Point-in-time 2x2 cells with derived margins.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, reaction, as_of_quarter]
+    columns:
+      - name: a
+        description: Reports naming both the drug and the reaction.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: b
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: c
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: d
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: a_source
+        description: How `a` was obtained. See prodrome.ingest.contingency.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [count_present, count_exhaustive, targeted]
+
+  - name: stg_disproportionality
+    description: Every estimator and criterion flag, per pair per quarter.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, reaction, as_of_quarter]
+    columns:
+      - name: eb05
+        description: >
+          5th percentile of the GPS posterior. Must not exceed EBGM; asserted in
+          the singular test assert_posterior_ordering.
+      - name: calibrated_p
+        tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+              config: {severity: warn}
+
+  - name: stg_label_version
+    description: Reconstructed SPL version timeline with validity intervals.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, spl_version]
+    columns:
+      - name: authoritative_date
+        tests: [not_null]
+      - name: is_usable
+        tests: [not_null]
+
+  - name: stg_label_mention
+    description: Per-version verdicts on whether a label describes a reaction.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, spl_version, reaction]
+    columns:
+      - name: verdict
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [labelled_core, labelled_secondary, not_labelled, unknown]
+      - name: decision_layer
+        tests:
+          - accepted_values:
+              arguments:
+                values: [lexical, semantic, none]
+
+  - name: stg_pair_outcome
+    description: Signal onset, label onset, lead time and censoring status.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, reaction, criterion]
+    columns:
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                - labelled_after_signal
+                - censored
+                - labelled_before_signal
+                - prevalent_at_baseline
+                - no_signal
+                - unobservable
+      - name: criterion
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [mhra_prr, ema_ror025, who_oe025, dubious_prr_only]
+      - name: firing_fraction
+        tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+
+  - name: stg_diagnostics
+    columns:
+      - name: robustness_score
+        tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+      - name: reporter_concentration
+        tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+
+  # ----------------------------------------------------------- intermediate ---
+  - name: int_pair_quarter
+    description: The analytical spine, with the label state in force at each quarter.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, reaction, as_of_quarter]
+    columns:
+      - name: drug_name
+        tests: [not_null]
+
+  - name: int_criterion_firing
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, reaction, as_of_quarter, criterion]
+
+  - name: int_label_transition
+    description: Detected label changes. The event this project predicts.
+    columns:
+      - name: transition_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [added, removed, present_at_baseline, unchanged]
+
+  # ------------------------------------------------------------------ marts ---
+  - name: mart_criterion_leadtime
+    description: The headline result -- lead time bought per criterion, and its cost.
+    columns:
+      - name: criterion
+        tests: [unique, not_null]
+
+  - name: mart_label_gap
+    description: Open label gaps as of the latest quarter, ranked for review.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [drug_unii, reaction]
+
+  - name: mart_drug_summary
+    columns:
+      - name: drug_unii
+        tests: [unique, not_null]
+
+  - name: mart_run_manifest
+    description: Provenance for the published run.
+    columns:
+      - name: run_id
+        tests: [unique, not_null]

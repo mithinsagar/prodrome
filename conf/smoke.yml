@@ -1,0 +1,43 @@
+# Smoke-test plan: a narrow window and the ONNX backend, so an end-to-end run
+# finishes in minutes against the live APIs. Used by `make smoke` and by the
+# integration test. Not the published configuration -- see prodrome.yml.
+include:
+  - cohort.yml
+  - negative_controls.yml
+
+window:
+  first_quarter: "2021Q1"
+  last_quarter: "2024Q4"
+
+http:
+  requests_per_minute: 120
+  timeout_seconds: 60.0
+  # openFDA's drug/event index was observed returning intermittent 500s on
+  # roughly 40% of requests while its other indexes stayed healthy. Nine
+  # attempts with jittered exponential backoff bring the per-request loss
+  # probability under 0.1%; responses are cached, so a re-run costs only what
+  # still has not succeeded.
+  # openFDA's drug/event index was observed returning intermittent 500s on roughly
+  # 40% of requests while drug/label, device/event and food/enforcement stayed
+  # healthy. Nine attempts with jittered exponential backoff bring the per-request
+  # loss probability under 0.1%; responses are cached on disk, so a re-run costs
+  # only what has not already succeeded.
+  max_retries: 8
+  backoff_base_seconds: 2.0
+  max_sleep_seconds: 45.0
+
+max_reactions_per_drug: 12
+min_reaction_reports: 10
+
+labelmatch:
+  embed_backend: onnx
+  onnx_model: BAAI/bge-small-en-v1.5
+  similarity_threshold: 0.62
+  chunk_sentences: 3
+  chunk_stride: 2
+  top_k: 5
+
+latency:
+  horizon_quarters: 8
+  holdout_from_quarter: "2023Q3"
+  min_case_count: 3

@@ -1,0 +1,6 @@
+packages:
+  # dbt_utils supplies unique_combination_of_columns and accepted_range, both of
+  # which are used heavily above. Pinned to a minor range so a CI run a year from
+  # now resolves the same macros.
+  - package: dbt-labs/dbt_utils
+    version: [">=1.3.0", "<2.0.0"]

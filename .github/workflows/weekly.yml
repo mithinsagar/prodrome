@@ -1,0 +1,167 @@
+name: weekly
+
+# FAERS is refreshed quarterly and openFDA reindexes on its own cadence, so a
+# weekly cadence is about right: frequent enough to catch a new quarter promptly,
+# infrequent enough to stay far inside the free API quota.
+on:
+  schedule:
+    # Sundays 04:20 UTC. Off the hour deliberately -- GitHub's scheduled runners are
+    # heavily contended on the hour and a job can be delayed by tens of minutes.
+    - cron: "20 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      cohort_limit:
+        description: "Only the first N drugs (leave blank for all)"
+        required: false
+      last_quarter:
+        description: "Override the final quarter, e.g. 2026Q2"
+        required: false
+      skip_labels:
+        description: "Skip the label backfill"
+        type: boolean
+        default: false
+
+concurrency:
+  group: weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PRODROME_OPENFDA_API_KEY: ${{ secrets.PRODROME_OPENFDA_API_KEY }}
+  PRODROME_LLM_PROVIDER: ${{ vars.PRODROME_LLM_PROVIDER || 'none' }}
+  PRODROME_LLM_API_KEY: ${{ secrets.PRODROME_LLM_API_KEY }}
+  PRODROME_LLM_MODEL: ${{ vars.PRODROME_LLM_MODEL }}
+  # The published figures use real local embeddings, not the CI hashing backend.
+  PRODROME_EMBED_BACKEND: onnx
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    # A cold-cache backfill is long. The free tier allows six hours; this leaves
+    # headroom while still failing rather than hanging indefinitely.
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e ".[dev,dbt,embed,tableau]"
+
+      # The API response cache is the single most valuable thing to persist: it
+      # turns a multi-hour backfill into an incremental run that fetches only the
+      # newest quarter. Keyed by week so it rolls forward rather than growing
+      # without bound, with a prefix restore so a new key still starts warm.
+      - name: restore the API response cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: openfda-cache-${{ github.run_id }}
+          restore-keys: |
+            openfda-cache-
+
+      # Model weights are ~130 MB and never change for a pinned model name.
+      - name: cache embedding model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-bge-small-en-v1.5
+
+      - name: environment check
+        run: prodrome doctor
+
+      - name: estimate the request budget
+        run: |
+          prodrome ingest --dry-run \
+            ${{ inputs.cohort_limit && format('--cohort-limit {0}', inputs.cohort_limit) || '' }} \
+            ${{ inputs.last_quarter && format('--last-quarter {0}', inputs.last_quarter) || '' }}
+
+      - name: ingest
+        # Two passes. openFDA's event index returns intermittent 500s; because every
+        # response is cached, a second pass costs only the requests the first lost.
+        run: |
+          for pass in 1 2; do
+            echo "::group::ingest pass $pass"
+            prodrome ingest \
+              ${{ inputs.cohort_limit && format('--cohort-limit {0}', inputs.cohort_limit) || '' }} \
+              ${{ inputs.last_quarter && format('--last-quarter {0}', inputs.last_quarter) || '' }} \
+              ${{ inputs.skip_labels && '--skip-labels' || '' }} || true
+            echo "::endgroup::"
+          done
+
+      - name: score
+        run: prodrome score
+
+      - name: latency and models
+        run: prodrome latency
+
+      - name: build marts and run data quality tests
+        working-directory: dbt
+        run: |
+          dbt deps
+          dbt build
+
+      - name: export
+        run: prodrome export
+
+      - name: weekly brief
+        run: prodrome brief --out data/exports/brief.md
+
+      - name: run summary
+        if: always()
+        run: |
+          {
+            echo "## prodrome weekly run"
+            echo
+            prodrome status 2>/dev/null || echo "status unavailable"
+            echo
+            echo "<details><summary>Weekly brief</summary>"
+            echo
+            cat data/exports/brief.md 2>/dev/null || echo "no brief produced"
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload the warehouse and exports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prodrome-${{ github.run_number }}
+          path: |
+            data/exports/
+            data/warehouse/prodrome.duckdb
+            dbt/target/
+          retention-days: 30
+
+      # The dashboard is published from the same job that produced its data, so the
+      # page and the bundle can never be a version apart.
+      - name: stage the dashboard
+        run: |
+          mkdir -p site
+          cp -r dashboard/* site/
+          mkdir -p site/data
+          cp data/exports/dashboard.json site/data/dashboard.json
+          cp data/exports/brief.md site/brief.md 2>/dev/null || true
+
+      - name: upload the pages artefact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  publish:
+    needs: pipeline
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

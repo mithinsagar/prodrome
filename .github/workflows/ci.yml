@@ -1,0 +1,140 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A queued CI run on a superseded commit is wasted minutes on a free tier.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep the embedding backend deterministic and offline in CI. The ONNX backend
+  # downloads ~130 MB of weights; the hashed backend is byte-identical everywhere,
+  # which is what a test suite needs.
+  PRODROME_EMBED_BACKEND: hashed
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: ruff (lint)
+        run: ruff check src tests tools
+      - name: ruff (format)
+        run: ruff format --check src tests tools
+      - name: mypy
+        run: mypy src
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and the ceiling of the supported range. Testing every minor in
+        # between costs minutes and has never caught anything the ends did not.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: unit and integration tests
+        # The network marker is deselected: CI must not depend on a third-party
+        # public API being up, and openFDA's event index is measurably flaky.
+        # tests/integration/test_live_apis.py runs on the weekly schedule instead,
+        # where a failure is information rather than noise.
+        run: pytest -m "not network" --cov=prodrome --cov-report=term-missing --cov-report=xml
+      - name: coverage summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET, pathlib
+          f = pathlib.Path("coverage.xml")
+          if f.exists():
+              rate = float(ET.parse(f).getroot().get("line-rate", 0)) * 100
+              print(f"::notice title=Coverage::{rate:.1f}% of lines covered")
+          PY
+
+  dbt:
+    # dbt resolves in its own dependency universe, so it gets its own job and its
+    # own install. Installing it alongside the application pins has produced
+    # conflicts on every attempt.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,dbt]"
+      - name: build a synthetic warehouse
+        # The dbt models and their tests are validated against a generated warehouse
+        # with known properties, including deliberately planted edge cases. That makes
+        # the data-quality tests meaningful in CI without any network access -- and it
+        # means a test can assert that a *bad* warehouse fails, which a real one cannot.
+        run: python tools/make_fixture_warehouse.py --out data/warehouse/prodrome.duckdb
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps
+      - name: dbt build (models + data quality tests)
+        working-directory: dbt
+        run: dbt build --target ci
+      - name: upload dbt artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target
+          path: dbt/target/
+          retention-days: 7
+
+  exports:
+    needs: dbt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,dbt,tableau]"
+      - name: build a synthetic warehouse and its marts
+        run: |
+          python tools/make_fixture_warehouse.py --out data/warehouse/prodrome.duckdb
+          cd dbt && dbt deps && dbt build --target ci
+      - name: export marts, Tableau extract and dashboard bundle
+        run: prodrome export
+      - name: verify the dashboard bundle is well formed
+        # The dashboard is a static page with no backend, so a malformed bundle is a
+        # blank page for every viewer. Checking its shape here is the only place the
+        # failure is cheap.
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          path = pathlib.Path("data/exports/dashboard.json")
+          bundle = json.loads(path.read_text())
+          required = {"schema_version", "manifest", "criteria", "drugs", "gaps",
+                      "leakage", "trend", "survival", "calibration",
+                      "coefficients", "queue"}
+          missing = required - set(bundle)
+          if missing:
+              sys.exit(f"dashboard bundle is missing keys: {sorted(missing)}")
+          print(f"bundle OK: {path.stat().st_size/1024:.0f} KB, keys {sorted(bundle)}")
+          PY
+      - name: upload exports
+        uses: actions/upload-artifact@v4
+        with:
+          name: exports
+          path: data/exports/
+          retention-days: 14

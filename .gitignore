@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+
+# Virtualenvs. Two of them: dbt resolves in its own dependency universe, so it
+# gets a separate environment (see ARCHITECTURE.md).
+.venv/
+.venv-dbt/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+.env
+
+# Derived data. Everything under data/ is reproducible from the APIs; the
+# manifests that make a run auditable are committed instead (see docs/RUNS.md).
+data/cache/
+data/warehouse/
+data/exports/
+!data/exports/.gitkeep
+
+# dbt. package-lock.yml IS committed: it pins the dbt_utils version so a CI run a
+# year from now resolves the same macros.
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+
+# Built dashboard
+dashboard/dist/
+
+# Local embedding model weights
+.models/

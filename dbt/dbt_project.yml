@@ -1,0 +1,39 @@
+name: prodrome
+version: "0.1.0"
+config-version: 2
+profile: prodrome
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  prodrome:
+    # Staging is views: it is thin renaming and typing over the Python-written
+    # tables, so materialising it would duplicate the warehouse for no gain.
+    staging:
+      +materialized: view
+      +schema: staging
+    # Intermediate joins are materialised: the pair-quarter join is read by several
+    # marts, and DuckDB re-executing it per mart is the slowest part of the build.
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+    # Marts are tables: they are what Tableau and the dashboard read, and an
+    # extract must not depend on a view chain being re-executed at query time.
+    marts:
+      +materialized: table
+      +schema: marts
+
+vars:
+  # Which run the models read. Defaults to the latest completed run; pin it to
+  # rebuild a historical run's marts.
+  run_id: "latest"
+  # Criterion used for the headline mart views. Every criterion is still available
+  # in mart_criterion_comparison.
+  primary_criterion: "ema_ror025"
+  # Minimum co-occurrence count for a pair to appear in the operational queue.
+  min_case_count: 3
