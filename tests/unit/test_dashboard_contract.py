@@ -264,3 +264,63 @@ def test_the_page_declares_both_theme_scopes() -> None:
     assert "prefers-color-scheme: dark" in css
     assert ':root[data-theme="dark"]' in css
     assert "--surface-1" in css and "--series-1" in css
+
+
+class TestExportCleaning:
+    """Frames must survive the Hyper writer's type inference.
+
+    Every case here was a real CI failure or a real near-miss: pyarrow infers the
+    `null` type for an entirely-empty column and Hyper rejects it outright, and an
+    infinity renders on a Tableau axis as a number.
+    """
+
+    def test_an_entirely_null_numeric_column_gets_a_concrete_type(self) -> None:
+        """`median_lead_quarters` is legitimately all-NULL when no criterion reached a
+        median, which is exactly the case on a left-truncated cohort."""
+        import pyarrow as pa
+
+        from prodrome.publish.export import _clean_for_export
+
+        frame = pd.DataFrame({"median_lead_quarters": [None, None], "criterion": ["a", "b"]})
+        cleaned = _clean_for_export(frame)
+        table = pa.Table.from_pandas(cleaned, preserve_index=False)
+        assert not pa.types.is_null(table.schema.field("median_lead_quarters").type)
+
+    def test_an_entirely_null_text_column_gets_a_concrete_type(self) -> None:
+        import pyarrow as pa
+
+        from prodrome.publish.export import _clean_for_export
+
+        frame = pd.DataFrame({"artefact_flags": [None, None]})
+        table = pa.Table.from_pandas(_clean_for_export(frame), preserve_index=False)
+        assert not pa.types.is_null(table.schema.field("artefact_flags").type)
+
+    def test_infinity_becomes_null_without_changing_the_dtype(self) -> None:
+        """pd.NA would promote the column to object, which re-creates the null-type
+        problem the first test covers."""
+        import numpy as np
+
+        from prodrome.publish.export import _clean_for_export
+
+        frame = pd.DataFrame({"inflation_ratio": [1.5, np.inf, -np.inf, 2.0]})
+        cleaned = _clean_for_export(frame)
+        assert pd.api.types.is_float_dtype(cleaned["inflation_ratio"])
+        assert cleaned["inflation_ratio"].isna().sum() == 2
+
+    def test_no_mart_column_defeats_arrow_inference(self) -> None:
+        """A whole frame of empty columns, as a fixture warehouse can produce."""
+        import pyarrow as pa
+
+        from prodrome.publish.export import _clean_for_export
+
+        frame = pd.DataFrame(
+            {
+                "all_null_float": pd.Series([None, None], dtype="float64"),
+                "all_null_object": pd.Series([None, None], dtype="object"),
+                "mixed": [1.0, None],
+                "text": ["a", None],
+            }
+        )
+        table = pa.Table.from_pandas(_clean_for_export(frame), preserve_index=False)
+        for field in table.schema:
+            assert not pa.types.is_null(field.type), f"{field.name} inferred as null"

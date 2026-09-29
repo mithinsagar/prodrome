@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from prodrome.warehouse import Warehouse
@@ -94,21 +95,41 @@ def _read_mart(warehouse: Warehouse, name: str) -> pd.DataFrame | None:
 def _clean_for_export(frame: pd.DataFrame) -> pd.DataFrame:
     """Make a frame safe for Hyper and Parquet.
 
-    Two problems to fix. Hyper rejects an all-null object column because it cannot
-    infer a type, so those become empty strings. And NaN and infinity round-trip
-    through Parquet but render in Tableau as a number, which would put "inf" on an
-    axis -- so non-finite floats become null, which Tableau draws as a gap.
+    Three problems, all of which produce a hard failure or a wrong axis rather than a
+    warning.
+
+    **An entirely-null column has no Arrow type.** pyarrow infers ``null`` for it, and
+    Hyper rejects that with ``Unsupported Arrow type: na``. This is not a hypothetical:
+    ``median_lead_quarters`` is legitimately NULL for every row when no criterion
+    reached a median, which is exactly what happens on a cohort whose labelled pairs
+    are all left-truncated. Such columns are cast to a concrete type -- float when the
+    column was numeric, empty string otherwise -- so the column survives into the
+    extract as an explicitly empty one rather than failing the export.
+
+    **pd.NA promotes a float column to object.** Using it to null out infinities
+    changes the column's dtype, which then re-enters the all-null problem above.
+    ``np.nan`` keeps float64.
+
+    **Infinity round-trips through Parquet but renders as a number in Tableau**, which
+    would put "inf" on an axis. Non-finite floats become null, which Tableau draws as
+    a gap.
     """
     cleaned = frame.copy()
     for column in cleaned.columns:
         series = cleaned[column]
+        was_numeric = pd.api.types.is_numeric_dtype(series)
         if pd.api.types.is_float_dtype(series):
-            cleaned[column] = series.replace([math.inf, -math.inf], pd.NA)
-        elif series.dtype == object:
-            if series.isna().all():
-                cleaned[column] = ""
-            else:
-                cleaned[column] = series.astype("string").fillna("")
+            # np.nan, not pd.NA: pd.NA would promote the column to object dtype.
+            series = series.replace([math.inf, -math.inf], np.nan)
+        elif series.dtype == object and not series.isna().all():
+            series = series.astype("string").fillna("")
+        if series.isna().all():
+            series = (
+                series.astype("float64")
+                if was_numeric
+                else pd.Series([""] * len(series), index=series.index, dtype="string")
+            )
+        cleaned[column] = series
     return cleaned
 
 
