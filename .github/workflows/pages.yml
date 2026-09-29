@@ -1,0 +1,67 @@
+name: pages
+
+# Publishes the dashboard from whatever bundle is committed.
+#
+# Separate from the weekly pipeline on purpose. The weekly job regenerates the data
+# and republishes, but it takes hours and depends on two third-party APIs; without
+# this, the site would be blank between a fresh clone and the first successful weekly
+# run. A dashboard that is sometimes empty for reasons unrelated to the dashboard is
+# worse than one that is occasionally a week stale.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: verify the committed bundle is loadable
+        # A malformed bundle is a blank page for every viewer, with no server-side
+        # error to notice. Checking here is the only place the failure is cheap.
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          path = pathlib.Path("dashboard/data/dashboard.json")
+          if not path.exists():
+              sys.exit("dashboard/data/dashboard.json is missing; run `prodrome export`")
+          bundle = json.loads(path.read_text())
+          required = {"schema_version", "manifest", "criteria", "drugs", "gaps",
+                      "leakage", "trend", "survival", "calibration",
+                      "coefficients", "queue"}
+          missing = required - set(bundle)
+          if missing:
+              sys.exit(f"bundle is missing keys the page reads: {sorted(missing)}")
+          manifest = bundle.get("manifest") or {}
+          print(
+              f"bundle OK: {path.stat().st_size / 1024:.0f} KB, "
+              f"run {manifest.get('run_id', 'unknown')}, "
+              f"data to {manifest.get('openfda_last_updated', 'unknown')}"
+          )
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
