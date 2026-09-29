@@ -52,6 +52,9 @@ LABEL_ENDPOINT = "https://api.fda.gov/drug/label.json"
 FIELD_RECEIVE_DATE = "receivedate"
 FIELD_DRUG_UNII = "patient.drug.openfda.unii.exact"
 FIELD_REACTION_PT = "patient.reaction.reactionmeddrapt.exact"
+#: The analysed (tokenised) form. Used only to narrow an aggregation for a term that
+#: cannot appear in a search clause; never as a count field, which would be a 500.
+FIELD_REACTION_ANALYSED = "patient.reaction.reactionmeddrapt"
 FIELD_SERIOUS = "serious"
 FIELD_QUALIFICATION = "primarysource.qualification"
 #: Note the ``.exact``. Counting the analysed form returns HTTP 500 -- see
@@ -251,8 +254,45 @@ class OpenFdaClient:
         """`a + b`: reports identifying the drug."""
         return self._total(q.all_of(drug.clause, self.window_clause(as_of)))
 
+    def _total_via_count_bucket(
+        self, reaction: str, prefix_clauses: tuple[str, ...], as_of: Quarter
+    ) -> int:
+        """Exact report count for a term openFDA will not accept as a search value.
+
+        The term cannot appear in a ``search`` clause (see
+        :data:`prodrome.clients.query.UNQUERYABLE_CHARACTERS`), so the query is
+        narrowed by the term's *tokens* on the analysed field and the exact count is
+        then read from a ``count`` aggregation's bucket.
+
+        The token narrowing is only a filter to keep the aggregation small -- it
+        over-matches, and deliberately is not used as the answer. Measured: AND-ing
+        the tokens of ``CROHN^S DISEASE`` returns 58,021 reports where the exact term
+        has 57,974, because other terms share both tokens. The bucket is exact; the
+        narrowing is not.
+        """
+        tokens = q.tokens_of(reaction)
+        if not tokens:
+            logger.warning("reaction %r has no usable tokens; counting it as zero", reaction)
+            return 0
+        narrowing = " AND ".join(f"{FIELD_REACTION_ANALYSED}:{token}" for token in tokens)
+        response = self._count(
+            q.all_of(*prefix_clauses, narrowing, self.window_clause(as_of)),
+            FIELD_REACTION_PT,
+        )
+        found = response.counts.get(reaction)
+        if found is None and response.truncated:
+            logger.warning(
+                "count aggregation for unqueryable term %r was truncated; its count is "
+                "not recoverable and is recorded as zero",
+                reaction,
+            )
+            return 0
+        return found or 0
+
     def reaction_reports(self, reaction: str, as_of: Quarter) -> int:
         """`a + c`: reports naming the reaction, any drug."""
+        if not q.is_searchable(reaction):
+            return self._total_via_count_bucket(reaction, (), as_of)
         return self._total(
             q.all_of(q.field_is(FIELD_REACTION_PT, reaction), self.window_clause(as_of))
         )
@@ -263,6 +303,8 @@ class OpenFdaClient:
         One request per cell, so this is the expensive path. It exists only as the
         fallback for reactions a truncated count aggregation could not answer.
         """
+        if not q.is_searchable(reaction):
+            return self._total_via_count_bucket(reaction, (drug.clause,), as_of)
         return self._total(
             q.all_of(
                 drug.clause,
@@ -295,13 +337,19 @@ class OpenFdaClient:
         """Counts broken down by a stratifying field, for the adjusted analysis."""
         # Stratum breakdowns qualify a signal but no statistic depends on them, so
         # a persistent upstream failure degrades the diagnostics rather than ending
-        # the run.
+        # the run. A term openFDA cannot accept as a search value is narrowed by its
+        # tokens instead -- imprecise, but these are diagnostics rather than estimates.
+        reaction_clause = (
+            q.field_is(FIELD_REACTION_PT, reaction)
+            if q.is_searchable(reaction)
+            else " AND ".join(
+                f"{FIELD_REACTION_ANALYSED}:{token}" for token in q.tokens_of(reaction)
+            )
+        )
+        if not reaction_clause:
+            return CountResponse({}, truncated=False, limit_applied=self.count_limit)
         return self._count(
-            q.all_of(
-                drug.clause,
-                q.field_is(FIELD_REACTION_PT, reaction),
-                self.window_clause(as_of),
-            ),
+            q.all_of(drug.clause, reaction_clause, self.window_clause(as_of)),
             field,
             on_error="skip",
         )
@@ -369,8 +417,17 @@ class OpenFdaClient:
         Counts by ``receivedate`` with no window, then buckets into quarters.
         One request covers the entire history of the pair.
         """
+        reaction_clause = (
+            q.field_is(FIELD_REACTION_PT, reaction)
+            if q.is_searchable(reaction)
+            else " AND ".join(
+                f"{FIELD_REACTION_ANALYSED}:{token}" for token in q.tokens_of(reaction)
+            )
+        )
+        if not reaction_clause:
+            return {}
         response = self._count(
-            q.all_of(drug.clause, q.field_is(FIELD_REACTION_PT, reaction)),
+            q.all_of(drug.clause, reaction_clause),
             FIELD_RECEIVE_DATE,
             on_error="skip",
         )

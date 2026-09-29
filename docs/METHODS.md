@@ -161,6 +161,39 @@ So every cell records how its `a` was obtained:
 Without that distinction a pipeline writes false zeros into precisely its most
 important cells, and nothing downstream would detect it.
 
+### Terms openFDA will not accept back
+
+openFDA encodes the apostrophe in eponymous reaction terms as a **caret**, so its own
+`count` aggregation returns `CROHN^S DISEASE`, `PARKINSON^S DISEASE` and
+`FOURNIER^S GANGRENE` — and then rejects those exact strings as search values with
+`BAD_REQUEST: Search not supported`, because `^` is Lucene's boost operator. Measured:
+the raw term, a backslash-escaped caret, a percent-encoded caret, and substituting an
+apostrophe or a space all fail. Hyphens are fine (`COVID-19` works).
+
+These are not obscure terms. **Fournier's gangrene is an FDA-warned adverse event for
+SGLT2 inhibitors**, FDA having added it to the class labelling in 2018, and
+empagliflozin is in this cohort. The first version of this pipeline aborted the entire
+drug on the resulting HTTP 400.
+
+Such a term is counted through a `count` aggregation instead: the query is narrowed by
+the term's alphanumeric tokens on the *analysed* field, and the exact figure is read
+from the aggregation's bucket. The narrowing is a filter and explicitly not the answer
+— AND-ing the tokens of `CROHN^S DISEASE` returns 58,021 reports where the exact term
+has 57,974, because other terms share both tokens. Verified against the live API:
+
+| term | `.exact` search | token AND | count bucket | truth |
+|---|---|---:|---:|---:|
+| `FOURNIER^S GANGRENE` | HTTP 400 | 2,394 | **2,394** | 2,394 |
+| `CROHN^S DISEASE` | HTTP 400 | 58,021 | **57,971** | 57,971 |
+| `PARKINSON^S DISEASE` | HTTP 400 | 16,700 | **16,426** | 16,426 |
+| `NAUSEA` (control) | 778,508 | 779,375 | 778,508 | 778,508 |
+
+Single-character tokens are dropped, because the caret encoding leaves a stray `S` from
+the possessive that matches an enormous number of unrelated reports. If the aggregation
+truncates and the term is absent from it, the count is genuinely unrecoverable and is
+recorded as zero with a warning — silently guessing would put a fabricated number into
+a published statistic.
+
 ### Unit of analysis
 
 The `count` aggregation counts reaction *occurrences*; the marginals from

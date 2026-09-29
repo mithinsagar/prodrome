@@ -26,6 +26,42 @@ from prodrome.timeframe import as_openfda_date
 #: quotes, so only the quote and the backslash actually need escaping inside one.
 _ESCAPE = re.compile(r'([\\"])')
 
+#: Characters that make a term unusable as a *search value* on openFDA, even quoted
+#: and even backslash-escaped.
+#:
+#: There is exactly one, and it is an upstream defect worth stating plainly: openFDA
+#: encodes the apostrophe in eponymous reaction terms as a caret, so its own ``count``
+#: aggregation returns ``CROHN^S DISEASE``, ``PARKINSON^S DISEASE`` and
+#: ``FOURNIER^S GANGRENE`` -- and then rejects those exact strings as search values
+#: with ``BAD_REQUEST: Search not supported``, because ``^`` is Lucene's boost
+#: operator. Measured: the raw term, a backslash-escaped caret, a percent-encoded
+#: caret, and substituting an apostrophe or a space all fail.
+#:
+#: These are not obscure terms. Fournier's gangrene is an FDA-warned adverse event for
+#: SGLT2 inhibitors, and empagliflozin -- an SGLT2 inhibitor -- is in this cohort. The
+#: first version of this pipeline lost the entire drug to it.
+#:
+#: :func:`prodrome.clients.openfda.OpenFdaClient.reaction_reports` routes such terms
+#: through a count aggregation instead, which returns the exact bucket. See
+#: ``docs/METHODS.md``.
+UNQUERYABLE_CHARACTERS = frozenset("^")
+
+_TOKEN_SPLIT = re.compile(r"[^A-Za-z0-9]+")
+
+
+def is_searchable(value: str) -> bool:
+    """Whether a term can be used as an openFDA search value at all."""
+    return not (UNQUERYABLE_CHARACTERS & set(value))
+
+
+def tokens_of(value: str) -> tuple[str, ...]:
+    """Alphanumeric tokens of a term, for narrowing an analysed-field query.
+
+    Single characters are dropped: the caret encoding leaves a stray "S" token from
+    a possessive, which matches enormous numbers of unrelated reports.
+    """
+    return tuple(t for t in _TOKEN_SPLIT.split(value.upper()) if len(t) > 1)
+
 
 def phrase(value: str) -> str:
     """Quote and escape a term for use as an exact phrase match.

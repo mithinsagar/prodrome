@@ -14,6 +14,7 @@ import httpx
 import pytest
 import respx
 
+from prodrome.clients import query
 from prodrome.clients.base import ApiClient, HttpCache, RateLimiter
 from prodrome.clients.openfda import (
     ANALYSED_STRING_FIELDS,
@@ -265,3 +266,95 @@ class TestAnalysedFieldGuard:
         with transport:
             assert client.reporter_country_counts(SELECTOR, "NAUSEA", Quarter(2024, 1)).counts
             assert client.qualification_counts(SELECTOR, "NAUSEA", Quarter(2024, 1)).counts
+
+
+class TestUnqueryableTerms:
+    """openFDA returns reaction terms it will not accept back as search values.
+
+    It encodes the apostrophe in eponymous terms as a caret, so its own count
+    aggregation yields `CROHN^S DISEASE`, `PARKINSON^S DISEASE` and
+    `FOURNIER^S GANGRENE` -- and then rejects those strings with BAD_REQUEST, because
+    `^` is Lucene's boost operator. Raw, backslash-escaped, percent-encoded, and
+    apostrophe- or space-substituted forms all fail.
+
+    These are not obscure: Fournier's gangrene is an FDA-warned adverse event for SGLT2
+    inhibitors, and the first version of this pipeline lost empagliflozin entirely to it.
+    """
+
+    @pytest.mark.parametrize(
+        "term", ["FOURNIER^S GANGRENE", "CROHN^S DISEASE", "PARKINSON^S DISEASE"]
+    )
+    def test_caret_terms_are_recognised_as_unsearchable(self, term: str) -> None:
+        assert not query.is_searchable(term)
+
+    @pytest.mark.parametrize("term", ["NAUSEA", "COVID-19", "ILL-DEFINED DISORDER"])
+    def test_ordinary_terms_including_hyphens_are_searchable(self, term: str) -> None:
+        """Hyphens are fine -- only the caret is rejected."""
+        assert query.is_searchable(term)
+
+    def test_single_character_tokens_are_dropped(self) -> None:
+        """The caret encoding leaves a stray "S" from the possessive, which on its own
+        matches an enormous number of unrelated reports."""
+        assert query.tokens_of("FOURNIER^S GANGRENE") == ("FOURNIER", "GANGRENE")
+
+    @respx.mock
+    def test_an_unsearchable_term_is_routed_through_a_count_bucket(self, tmp_path: Path) -> None:
+        """The bucket is exact. The token narrowing is only a filter.
+
+        Measured against the live API: AND-ing the tokens of `CROHN^S DISEASE` returns
+        58,021 reports where the exact term has 57,974, because other terms share both
+        tokens. So the narrowed query must never be used as the answer -- only to keep
+        the aggregation small enough to read the right bucket out of.
+        """
+        captured: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"term": "CROHN^S DISEASE", "count": 57974},
+                        {"term": "CROHN^S DISEASE COMPLICATION", "count": 47},
+                    ]
+                },
+            )
+
+        respx.get(url__startswith=EVENT_ENDPOINT).mock(side_effect=handler)
+        client, transport = build(tmp_path)
+        with transport:
+            got = client.reaction_reports("CROHN^S DISEASE", Quarter(2026, 2))
+
+        assert got == 57974, "the exact bucket, not the token-narrowed total"
+        sent = str(captured[0].url)
+        assert "count=patient.reaction.reactionmeddrapt.exact" in sent
+        assert "CROHN%5ES" not in sent, "the caret must not reach the search clause"
+        assert "CROHN" in sent and "DISEASE" in sent, "narrowed by tokens"
+
+    @respx.mock
+    def test_a_truncated_bucket_search_reports_zero_and_warns(self, tmp_path: Path) -> None:
+        """If the aggregation truncated and the term is absent, its count is genuinely
+        unrecoverable. Zero is recorded, and the log says so -- silently guessing would
+        put a fabricated number into a published statistic."""
+        rows = [{"term": f"OTHER TERM {i}", "count": 1000 - i} for i in range(1000)]
+        respx.get(url__startswith=EVENT_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"results": rows})
+        )
+        client, transport = build(tmp_path)
+        with transport:
+            assert client.reaction_reports("CROHN^S DISEASE", Quarter(2026, 2)) == 0
+
+    @respx.mock
+    def test_a_searchable_term_still_uses_the_direct_path(self, tmp_path: Path) -> None:
+        """The fallback must not become the default: it costs an aggregation."""
+        captured: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(200, json={"meta": {"results": {"total": 778508}}})
+
+        respx.get(url__startswith=EVENT_ENDPOINT).mock(side_effect=handler)
+        client, transport = build(tmp_path)
+        with transport:
+            assert client.reaction_reports("NAUSEA", Quarter(2026, 2)) == 778508
+        assert "count=" not in str(captured[0].url)

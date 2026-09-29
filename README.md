@@ -102,7 +102,7 @@ DailyMed SPL archive ┘                                       ▼
 
 ---
 
-## Five things that had to be got right
+## Six things that had to be got right
 
 Each of these was found by measuring against the live APIs, and each silently
 produces wrong numbers rather than an error.
@@ -136,7 +136,21 @@ factually incorrect. That is why identity is resolved from the SPL document's ow
 ingredient block, filtered to `classCode="ACTIB"` — otherwise you key the cohort on
 disodium phosphate.
 
-### 3. A truncated aggregation is not a zero
+### 3. openFDA returns terms it will not accept back
+
+It encodes the apostrophe in eponymous reaction terms as a **caret**, so its own count
+aggregation yields `CROHN^S DISEASE`, `PARKINSON^S DISEASE` and `FOURNIER^S GANGRENE` —
+then rejects those strings as search values with `BAD_REQUEST`, because `^` is Lucene's
+boost operator. Raw, backslash-escaped, percent-encoded and apostrophe-substituted
+forms all fail.
+
+**Fournier's gangrene is an FDA-warned adverse event for SGLT2 inhibitors** and
+empagliflozin is in this cohort, so this is not a curiosity: the first version of the
+pipeline aborted that entire drug on the resulting HTTP 400. Such terms are now counted
+through a `count` aggregation and read from its exact bucket — the obvious workaround,
+AND-ing the term's tokens, overcounts by 47 reports on Crohn's and 274 on Parkinson's.
+
+### 4. A truncated aggregation is not a zero
 
 `count=patient.reaction.reactionmeddrapt.exact` returns, for a single term, exactly
 the report count for that term — verified term by term (`NAUSEA` 537 = 537,
@@ -150,7 +164,7 @@ records how its count was obtained: exhaustive response (absence is a real zero)
 present in the aggregation, or fetched individually. Without that distinction the
 pipeline writes false zeros into its most important cells.
 
-### 4. MedDRA is British, US labels are American
+### 5. MedDRA is British, US labels are American
 
 MedDRA is maintained to British spelling; US prescribing information is American.
 So the FAERS term is `Diarrhoea` and the label says `diarrhea`; `Oesophagitis`
@@ -160,7 +174,7 @@ direction that makes the project's headline look better, which is the worst kind
 bug. Handled by a curated stem list rather than a blanket `oe → e` rule, which would
 mangle "toe", "does" and "shoe" in the label text being searched.
 
-### 5. A fixed cosine threshold cannot work here
+### 6. A fixed cosine threshold cannot work here
 
 Embedding similarity on short clinical terms, measured with `bge-small-en-v1.5`:
 
