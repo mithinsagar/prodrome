@@ -93,3 +93,62 @@ def test_quarters_between_rejects_a_backwards_window() -> None:
 def test_openfda_date_format() -> None:
     assert as_openfda_date(dt.date(2023, 9, 30)) == "20230930"
     assert as_openfda_date(dt.date(2023, 1, 5)) == "20230105"
+
+
+class TestVersionSampling:
+    """Label histories are reduced to what the quarter grain can resolve.
+
+    Pembrolizumab has 100 archived versions and each is a multi-megabyte download, so
+    fetching versions the analysis cannot distinguish is pure cost.
+    """
+
+    def test_keeps_the_last_version_in_each_quarter(self) -> None:
+        """A reaction added part-way through a quarter should be detected in that
+        quarter, not the next one -- so the last version wins, not the first."""
+        import datetime as dt
+
+        from prodrome.clients.dailymed import SplVersion
+        from prodrome.ingest.labels import sample_versions_to_quarters
+
+        versions = [
+            SplVersion(1, dt.date(2023, 1, 10)),
+            SplVersion(2, dt.date(2023, 2, 20)),
+            SplVersion(3, dt.date(2023, 3, 30)),  # last of 2023Q1
+            SplVersion(4, dt.date(2023, 5, 5)),  # only one in 2023Q2
+        ]
+        kept = [v.version for v in sample_versions_to_quarters(versions)]
+        assert kept == [1, 3, 4], "baseline plus the last of each quarter"
+
+    def test_always_keeps_the_first_archived_version(self) -> None:
+        """It defines the left-truncation baseline. Dropping it in favour of the
+        quarter's last version could miss an addition made inside that quarter and
+        wrongly mark the pair prevalent."""
+        import datetime as dt
+
+        from prodrome.clients.dailymed import SplVersion
+        from prodrome.ingest.labels import sample_versions_to_quarters
+
+        versions = [SplVersion(i, dt.date(2023, 1, i)) for i in range(1, 6)]
+        kept = sample_versions_to_quarters(versions)
+        assert kept[0].version == 1
+        assert len(kept) == 2, "baseline plus the quarter's last version"
+
+    def test_a_long_history_collapses_to_at_most_one_per_quarter_plus_baseline(self) -> None:
+        import datetime as dt
+
+        from prodrome.clients.dailymed import SplVersion
+        from prodrome.ingest.labels import sample_versions_to_quarters
+
+        # 100 versions spread over 5 years: at most 20 quarters plus the baseline.
+        versions = [
+            SplVersion(i, dt.date(2020, 1, 1) + dt.timedelta(days=18 * i)) for i in range(100)
+        ]
+        kept = sample_versions_to_quarters(versions)
+        assert len(kept) <= 21, f"expected quarter-grain reduction, got {len(kept)}"
+        quarters = {Quarter.containing(v.published).label for v in kept}
+        assert len(kept) - len(quarters) <= 1, "at most the baseline may share a quarter"
+
+    def test_empty_history_is_empty(self) -> None:
+        from prodrome.ingest.labels import sample_versions_to_quarters
+
+        assert sample_versions_to_quarters([]) == []

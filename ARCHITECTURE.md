@@ -173,34 +173,56 @@ data can never be a version apart.
 
 ---
 
-## Handling a genuinely unreliable upstream
+## Handling upstream failure, and a lesson about diagnosing it
 
-openFDA's `drug/event` index was measured during development returning HTTP 500 on
-roughly **40% of requests** while `drug/label`, `device/event` and `food/enforcement`
-stayed healthy at the same moment. That is not an edge case to note; it is a condition
-the pipeline has to work in.
+Every query shape this pipeline sends now succeeds 45 times out of 45 against the
+live API. It did not start that way, and how that was misdiagnosed is worth recording.
 
-Four mechanisms, layered:
+During development, `drug/event` appeared to fail on roughly 40% of requests while
+`drug/label`, `device/event` and `food/enforcement` stayed healthy. That pattern reads
+unambiguously as an unhealthy index, and the response was to widen the retry budget to
+nine attempts and build a circuit breaker.
 
-1. **On-disk response caching.** Every successful response is kept, so re-running is
-   the primary remedy: each pass costs only what the previous one lost.
-2. **Jittered exponential backoff**, up to nine attempts. Full jitter, because a burst
-   of failures otherwise produces a synchronised retry storm against the same second.
-3. **Per-call retry budgets.** `on_error="skip"` marks data the analysis can proceed
-   without, and those requests get two attempts rather than nine. A skipped *count*
-   would silently become a missing cell; a skipped *diagnostic* merely leaves a signal
-   unqualified, so the distinction is the caller's to make.
-4. **A circuit breaker.** Above a 50% failure rate over the last 20 requests, even
-   essential requests drop to the short budget. Retry policy tuned for occasional
-   failure is pathological at a 40% failure rate — it turns a ten-minute job into a
-   five-hour one and makes the outage worse for everyone else. The breaker closes
-   itself as soon as successes refill the window.
+It was a one-word bug in this repository. **openFDA answers a `count` aggregation over
+an analysed string field with HTTP 500, not 400** — so `count=occurcountry` failed
+every single time, deterministically, and `count=occurcountry.exact` works. Mixed into
+a sample with healthy query shapes, a deterministic failure on one shape is
+statistically identical to a random failure across all of them. The retry machinery
+then did its job perfectly and hid the bug: every failure was absorbed, logged as
+transient, and retried.
 
-Failures are counted into `RequestStats` and surfaced in the run summary, and a drug
-that fails persistently is skipped and **named** — a silently absent drug is
-indistinguishable from a drug with no signals in every downstream aggregate.
+Three things follow, and all of them are now in the code:
 
----
+1. **Validate before spending a request.** `openfda.validate_count_field` rejects an
+   analysed field with an explanatory error rather than letting the API answer 500.
+   A client error that arrives dressed as a server error will be retried, and
+   retrying a deterministic failure is pure waste.
+2. **Never diagnose a failure rate without holding the query shape fixed.** The
+   original measurement sampled several shapes together. One shape at a time would
+   have found this in a minute.
+3. **Resilience machinery obscures bugs as well as absorbing faults.** The retries and
+   the breaker are still here — a client hammering a free public service through a
+   sustained failure is badly behaved whoever is at fault — but `RequestStats.failures`
+   is now surfaced in the run summary precisely so that a non-zero count on a healthy
+   API is treated as a defect to investigate rather than weather to endure.
+
+The layered mechanisms remain, sized for genuine transient faults:
+
+- **On-disk response caching.** Every successful response is kept, so re-running costs
+  only what the previous pass lost, and a full re-derivation needs no network at all.
+- **Jittered exponential backoff**, five attempts. Full jitter, so a burst of failures
+  does not produce a synchronised retry storm against the same second.
+- **Per-call retry budgets.** `on_error="skip"` marks data the analysis can proceed
+  without, and those requests get two attempts rather than five. A skipped *count*
+  would silently become a missing cell; a skipped *diagnostic* merely leaves a signal
+  unqualified, so the distinction belongs to the caller.
+- **A circuit breaker.** Above a 50% failure rate over the last 20 requests, even
+  essential requests drop to the short budget, and it closes itself once successes
+  refill the window.
+
+A drug that fails persistently is skipped and **named** in the run summary, because a
+silently absent drug is indistinguishable from a drug with no signals in every
+downstream aggregate.
 
 ## Testing strategy
 
@@ -208,7 +230,7 @@ indistinguishable from a drug with no signals in every downstream aggregate.
 |---|---|---|
 | estimators | simulation recovery from a known generating process; constructed cases with known answers | there is no closed-form oracle for EBGM; recovering the parameters that generated the data is the real check |
 | label matching | the semaglutide/ileus transition between real archived label versions | a ground-truth regulatory event with a known date |
-| HTTP client | respx-mocked, including malformed `Retry-After`, 200-with-HTML, and a 40%-failure upstream | the real API cannot be made to fail on demand, and CI must not depend on it being up |
+| HTTP client | respx-mocked, including malformed `Retry-After`, 200-with-HTML, a tripped circuit breaker, and the analysed-field guard | the real API cannot be made to fail on demand, and CI must not depend on it being up |
 | dbt models | a synthetic warehouse with known properties | lets tests assert that *bad* data fails, which real data cannot demonstrate |
 | data quality | `make dbt-negative` runs the suite against planted violations and expects failure | a test never observed to fail is not known to work |
 | live APIs | `tests/integration`, marked `network`, excluded from CI | run on the weekly schedule, where a failure is information rather than noise |

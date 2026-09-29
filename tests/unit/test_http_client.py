@@ -270,9 +270,9 @@ class TestRateLimiter:
 
 
 class TestFailureTolerance:
-    """openFDA's drug/event index returns intermittent 500s while its other
-    indexes stay healthy -- observed directly during development. A long run has
-    to survive that, but only for data the analysis can proceed without."""
+    """A long run must survive a transient fault, but only for data the analysis can
+    proceed without. Essential data fails loudly, because a skipped count becomes a
+    missing cell that is indistinguishable downstream from a real zero."""
 
     @respx.mock
     def test_skip_mode_returns_none_and_counts_the_failure(self, tmp_path: Path) -> None:
@@ -316,10 +316,12 @@ class TestFailureTolerance:
 class TestCircuitBreaker:
     """A high failure rate must change the retry policy, not just be endured.
 
-    openFDA's event index was measured failing roughly 40% of requests. Nine patient
-    attempts per request is correct for an occasional failure and pathological at
-    that rate -- it turns a ten-minute job into a five-hour one and makes the outage
-    worse for everyone else.
+    A retry policy tuned for the occasional transient fault behaves pathologically
+    when failures are systematic: nine patient attempts per request turns a
+    ten-minute job into a multi-hour one and makes the upstream's problem worse for
+    everyone else. (In this project's case the systematic failure turned out to be a
+    malformed query of its own -- see openfda.validate_count_field -- but the guard
+    is worth keeping either way.)
     """
 
     def test_does_not_open_before_the_window_fills(self) -> None:

@@ -98,8 +98,9 @@ class IngestResult:
                 + (" ..." if len(self.failed_drugs) > 5 else "")
             )
             lines.append(
-                "    openFDA's drug/event index returns intermittent 500s; re-run to "
-                "pick these up from the cache."
+                "    Responses are cached, so re-running costs only what failed. If this "
+                "recurs for the same drug, check its selector rather than assuming a "
+                "transient fault."
             )
         if self.quota_exhausted:
             lines.append(
@@ -161,9 +162,10 @@ def run_ingest(
             try:
                 reactions = harvester.discover_reactions(drug, last_quarter)
             except ApiError as exc:
-                # openFDA's drug/event index returns intermittent 500s. One drug
-                # failing discovery must not cost the other 54, so the failure is
-                # recorded and the drug is skipped -- visibly, in the summary.
+                # One drug failing must not cost the other 54. The failure is
+                # recorded and the drug skipped -- visibly, in the summary, because a
+                # silently absent drug is indistinguishable from a drug with no
+                # signals in every downstream aggregate.
                 logger.error("reaction discovery failed for %s: %s", drug.name, exc)
                 result.failed_drugs.append(drug.name)
                 continue
@@ -194,8 +196,9 @@ def run_ingest(
             )
 
         # ---- label timelines and mention verdicts ----------------------------
-        # DailyMed is a separate service and was healthy in every observed openFDA
-        # outage, so label ingest is attempted even when event ingest degraded.
+        # DailyMed is a separate service, so label ingest is attempted even when the
+        # event harvest degraded -- a partial warehouse with a full label timeline is
+        # still useful, and the reverse is not.
         if not skip_labels:
             _harvest_labels(warehouse, dailymed, config, settings, run_id, result)
 

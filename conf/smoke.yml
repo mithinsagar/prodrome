@@ -17,14 +17,19 @@ http:
   # attempts with jittered exponential backoff bring the per-request loss
   # probability under 0.1%; responses are cached, so a re-run costs only what
   # still has not succeeded.
-  # openFDA's drug/event index was observed returning intermittent 500s on roughly
-  # 40% of requests while drug/label, device/event and food/enforcement stayed
-  # healthy. Nine attempts with jittered exponential backoff bring the per-request
-  # loss probability under 0.1%; responses are cached on disk, so a re-run costs
-  # only what has not already succeeded.
-  max_retries: 8
-  backoff_base_seconds: 2.0
-  max_sleep_seconds: 45.0
+  # Five attempts with jittered exponential backoff. Measured against the live API,
+  # every query shape this pipeline sends succeeds 45/45, so retries exist for
+  # genuine transient faults rather than for a chronically unhealthy upstream.
+  #
+  # An earlier version of this file set nine attempts, on the belief that openFDA's
+  # event index failed ~40% of the time. That was wrong: the failures were entirely
+  # one malformed query of ours -- counting an analysed string field, which openFDA
+  # answers with HTTP 500 rather than 400. Retrying a deterministic client error is
+  # pure waste, so the fix was a pre-flight guard (see openfda.validate_count_field),
+  # not a bigger retry budget.
+  max_retries: 5
+  backoff_base_seconds: 1.5
+  max_sleep_seconds: 30.0
 
 max_reactions_per_drug: 12
 min_reaction_reports: 10

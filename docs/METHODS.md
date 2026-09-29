@@ -688,10 +688,15 @@ silently producing coefficients that look like a result.
    Which source was used is recorded per quarter.
 9. **The cohort is 55 drugs**, chosen for label movement. Results do not generalise to
    drugs whose labels have never changed.
-10. **openFDA's event index is intermittently unreliable** — measured returning HTTP 500
-    on roughly 40% of requests during development while its other indexes stayed
-    healthy. Handled with retries, a circuit breaker and on-disk caching, but a run
-    during a bad window may be partial. Partial runs are recorded as such.
+ 10. **openFDA reports some client errors as HTTP 500.** Counting an *analysed* string
+     field — `count=occurcountry` rather than `count=occurcountry.exact` — returns 500,
+     not 400. A client error dressed as a server error gets retried, and the retries
+     hide it; during development this was misdiagnosed as a ~40% random failure rate on
+     the whole index. `openfda.validate_count_field` now rejects such queries before a
+     request is spent, and every shape the pipeline sends succeeds 45/45. Genuine
+     transient faults remain possible, and a run that exhausts its request budget is
+     recorded as partial rather than silently truncated. See ARCHITECTURE.md for the
+     full account, which is a better lesson than the bug.
 
 ---
 

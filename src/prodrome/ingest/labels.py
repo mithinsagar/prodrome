@@ -38,11 +38,12 @@ import random
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
-from prodrome.clients.dailymed import DailyMedClient, LabelDocument
+from prodrome.clients.dailymed import DailyMedClient, LabelDocument, SplVersion
 from prodrome.config import CohortDrug, Config
 from prodrome.labelmatch.decide import LabelMatcher, MentionDecision
 from prodrome.labelmatch.embed import Embedder
 from prodrome.labelmatch.sectioning import ParsedLabel, parse_label
+from prodrome.timeframe import Quarter
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,41 @@ logger = logging.getLogger(__name__)
 #: reproducible: the empirical null depends on which terms were sampled, so an
 #: unseeded sample would let two runs disagree about whether a reaction is labelled.
 NULL_SAMPLE_SEED = 20240101
+
+
+def sample_versions_to_quarters(versions: Sequence[SplVersion]) -> list[SplVersion]:
+    """Reduce a label history to the versions the analysis can actually resolve.
+
+    Label histories are long -- pembrolizumab has 100 archived versions, adalimumab 69
+    -- and every one is a multi-megabyte archive to download and parse. But the
+    analysis grain is a quarter, so several versions inside the same quarter cannot be
+    distinguished by anything downstream: the onset of a label change is recorded as a
+    quarter either way.
+
+    Two versions are therefore kept per drug-quarter at most:
+
+    * the **last** version in each quarter, because a reaction added part-way through a
+      quarter should be detected in that quarter rather than the next one;
+    * the **first archived version overall**, always, because it defines the
+      left-truncation baseline -- whether a reaction was already labelled before the
+      observation window opened. Taking the last version of the first quarter instead
+      could miss an addition made inside that quarter and wrongly mark the pair
+      prevalent.
+
+    This is lossy by design and the loss is bounded and stated: label changes are
+    resolved to quarter granularity, which is the granularity everything else in the
+    project uses.
+    """
+    if not versions:
+        return []
+    ordered = sorted(versions, key=lambda v: (v.published, v.version))
+    last_per_quarter: dict[str, SplVersion] = {}
+    for entry in ordered:
+        last_per_quarter[Quarter.containing(entry.published).label] = entry
+    kept = {entry.version: entry for entry in last_per_quarter.values()}
+    baseline = ordered[0]
+    kept.setdefault(baseline.version, baseline)
+    return sorted(kept.values(), key=lambda v: (v.published, v.version))
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,10 +214,18 @@ class LabelTimelineBuilder:
             return []
 
         records: list[LabelVersionRecord] = []
-        history = self._client.version_history(drug.spl_set_id)
-        if not history:
+        full_history = self._client.version_history(drug.spl_set_id)
+        if not full_history:
             logger.warning("no label history for %s (%s)", drug.name, drug.spl_set_id)
             return []
+        history = sample_versions_to_quarters(full_history)
+        if len(history) < len(full_history):
+            logger.info(
+                "%s: %d archived versions reduced to %d at quarter grain",
+                drug.name,
+                len(full_history),
+                len(history),
+            )
 
         # Each archive is a multi-megabyte ZIP and a cold backfill fetches every
         # version of every drug, so this is the longest-running phase of the

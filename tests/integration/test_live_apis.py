@@ -1,9 +1,9 @@
 """Tests against the live public APIs.
 
-Marked ``network`` and excluded from CI, because openFDA's event index was measured
-returning HTTP 500 on roughly 40% of requests while its sibling indexes stayed
-healthy. A CI job that depends on it fails for reasons unrelated to the change under
-review, and a suite that fails randomly is a suite people stop reading. These run on
+Marked ``network`` and excluded from CI. Not because the API is unreliable -- every
+shape the pipeline sends succeeds 45/45 -- but because a test that reaches a
+third-party service can fail for reasons unrelated to the change under review, and a
+suite that fails for unrelated reasons is a suite people stop reading. These run on
 the weekly schedule instead, where a failure is information.
 
 What they exist to catch is narrow but important: an upstream *contract* change. The
@@ -79,6 +79,32 @@ def dailymed(cache_dir: Path) -> DailyMedClient:
         backoff_base_seconds=2.0,
     )
     return DailyMedClient(transport)
+
+
+class TestCountFieldGuard:
+    """openFDA answers a count over an analysed string field with HTTP 500.
+
+    A client error dressed as a server error gets retried, and the retries hide it.
+    This asserts both halves of the finding against the live API, so a change in
+    openFDA's behaviour shows up here rather than as a mystery outage.
+    """
+
+    def test_the_analysed_form_really_does_fail(self, openfda: OpenFdaClient) -> None:
+        from prodrome.clients.openfda import CountFieldError, validate_count_field
+
+        with pytest.raises(CountFieldError, match="analysed string field"):
+            validate_count_field("occurcountry")
+
+    def test_the_exact_form_works(self, openfda: OpenFdaClient) -> None:
+        response = openfda.reporter_country_counts(SELECTOR, "NAUSEA", Quarter(2024, 4))
+        assert response.counts, "expected a country breakdown"
+        assert "US" in response.counts, "FAERS is a US database; US should dominate"
+
+    def test_coded_fields_must_not_carry_exact(self, openfda: OpenFdaClient) -> None:
+        """qualification, sex and serious are coded, not analysed."""
+        response = openfda.qualification_counts(SELECTOR, "NAUSEA", Quarter(2024, 4))
+        assert response.counts
+        assert set(response.counts) <= {"1", "2", "3", "4", "5"}
 
 
 class TestOpenFdaContract:

@@ -345,6 +345,33 @@ not known to work.
 
 ---
 
+## One debugging story worth reading
+
+`drug/event` appeared to fail on ~40% of requests during development, while
+`drug/label`, `device/event` and `food/enforcement` stayed healthy. That reads
+unambiguously as an unhealthy index, so the retry budget went to nine attempts and a
+circuit breaker got built.
+
+It was a one-word bug here. **openFDA answers a `count` over an analysed string field
+with HTTP 500, not 400** — so `count=occurcountry` failed every time and
+`count=occurcountry.exact` works. Mixed into a sample with healthy query shapes, a
+deterministic failure on one shape is statistically indistinguishable from a random
+failure across all of them, and the retry machinery then hid it perfectly: every
+failure absorbed, logged as transient, retried.
+
+Three fixes, all in the code: a pre-flight guard that rejects an analysed field with an
+explanatory error rather than spending a request on a 500
+(`openfda.validate_count_field`); a failure counter surfaced in the run summary, so a
+non-zero count on a healthy API reads as a defect rather than as weather; and the
+retry budget back down to five. Every query shape the pipeline sends now succeeds
+45/45.
+
+The generalisable lesson is the second one: **resilience machinery obscures bugs as
+readily as it absorbs faults.** And never measure a failure rate without holding the
+query shape fixed — one shape at a time would have found this in a minute.
+
+---
+
 ## Data sources and terms
 
 - **openFDA** drug adverse event and drug label APIs — public domain, no

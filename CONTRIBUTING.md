@@ -81,9 +81,25 @@ pytest -m network -k GroundTruthLabelTransition
 That asserts ileus is absent from Ozempic's 2022 label and present in its 2023 one,
 which is the transition the whole project is calibrated against.
 
-## Working against a degraded upstream
+## If the API starts failing
 
-openFDA's `drug/event` index returns intermittent HTTP 500s — measured at roughly 40%
-of requests during development, while its sibling indexes were healthy. Responses are
-cached on disk, so the remedy is to run the stage again: each pass costs only what the
-previous one lost. `prodrome status` shows the request accounting.
+Every query shape the pipeline sends succeeds 45/45 against the live API, so a wave of
+failures is much more likely to be a bug here than an outage there. That is not a
+guess: the one sustained "outage" during development was `count=occurcountry` without
+`.exact`, which openFDA answers with **HTTP 500 rather than 400** — a client error
+disguised as a server error, which the retry machinery then absorbed and hid.
+
+So before widening a retry budget:
+
+1. **Hold the query shape fixed and repeat it.** A deterministic failure on one shape
+   looks exactly like a random failure across many when the shapes are sampled
+   together. That is precisely the mistake that was made here.
+2. **Check whether a counted field is analysed.** `openfda.ANALYSED_STRING_FIELDS`
+   lists the ones needing `.exact`; `validate_count_field` enforces it. Coded and date
+   fields (`primarysource.qualification`, `patient.patientsex`, `serious`,
+   `receivedate`) must *not* carry it.
+3. **Look at `RequestStats.failures`** in the run summary. A healthy run ends at zero.
+   A non-zero count is a defect to investigate, not weather to endure.
+
+Responses are cached on disk, so re-running a stage costs only what the previous pass
+did not get. `prodrome status` shows the request accounting.

@@ -54,9 +54,65 @@ FIELD_DRUG_UNII = "patient.drug.openfda.unii.exact"
 FIELD_REACTION_PT = "patient.reaction.reactionmeddrapt.exact"
 FIELD_SERIOUS = "serious"
 FIELD_QUALIFICATION = "primarysource.qualification"
-FIELD_COUNTRY = "occurcountry"
+#: Note the ``.exact``. Counting the analysed form returns HTTP 500 -- see
+#: :func:`validate_count_field`.
+FIELD_COUNTRY = "occurcountry.exact"
+FIELD_SOURCE_COUNTRY = "primarysourcecountry.exact"
 FIELD_SEX = "patient.patientsex"
 FIELD_DRUG_ROLE = "patient.drug.drugcharacterization"
+
+#: Fields that hold free text and are therefore *analysed* (tokenised) by openFDA's
+#: index. A ``count`` aggregation over the analysed form of one of these fails, and it
+#: fails as **HTTP 500**, not 400 -- openFDA reports this client error as a server
+#: error. That misreporting cost real debugging time here: a deterministic 500 on one
+#: query shape, mixed into a sample with healthy shapes, looks exactly like an
+#: intermittently flaky upstream, and the retry machinery dutifully hid it.
+#:
+#: Measured:
+#:   count=occurcountry        -> HTTP 500, every attempt
+#:   count=occurcountry.exact  -> 200, 56 rows (US=8931, CA=358, CN=135, GB=114)
+#:
+#: Coded and date fields (primarysource.qualification, patient.patientsex, serious,
+#: receivedate) are not analysed and must NOT carry ``.exact``.
+ANALYSED_STRING_FIELDS = frozenset(
+    {
+        "occurcountry",
+        "primarysourcecountry",
+        "patient.reaction.reactionmeddrapt",
+        "patient.drug.medicinalproduct",
+        "patient.drug.openfda.generic_name",
+        "patient.drug.openfda.brand_name",
+        "patient.drug.openfda.substance_name",
+        "patient.drug.openfda.unii",
+        "patient.drug.activesubstance.activesubstancename",
+        "patient.drug.drugindication",
+        "safetyreportid",
+    }
+)
+
+
+class CountFieldError(ValueError):
+    """A field cannot be used in a ``count`` aggregation as written."""
+
+
+def validate_count_field(field: str) -> str:
+    """Check a count field before spending a request on it.
+
+    Raises rather than letting openFDA answer with a 500, because a 500 is
+    indistinguishable from a transient fault: the client would retry it nine times,
+    the circuit breaker would trip, and the run would look like an upstream outage
+    instead of a one-word bug.
+
+    Raises:
+        CountFieldError: the field is analysed and lacks the required ``.exact``.
+    """
+    if field in ANALYSED_STRING_FIELDS:
+        raise CountFieldError(
+            f"{field!r} is an analysed string field and cannot be counted directly; "
+            f"openFDA answers that with HTTP 500. Use {field}.exact instead."
+        )
+    return field
+
 
 #: Earliest receivedate worth querying. FAERS in its current form starts in 2004;
 #: earlier records exist but are sparse and differently coded.
@@ -126,7 +182,7 @@ class OpenFdaClient:
             raise ValueError(f"unexpected openFDA envelope for search={search!r}") from exc
 
     def _count(self, search: str, field: str, *, on_error: str = "raise") -> CountResponse:
-        params: dict[str, Any] = {"search": search, "count": field}
+        params: dict[str, Any] = {"search": search, "count": validate_count_field(field)}
         # Sending limit without a key is a 403, not a clamp, so only send it when
         # we can actually use it.
         if self.has_api_key:

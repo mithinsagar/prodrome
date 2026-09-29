@@ -7,6 +7,7 @@ wrong numbers rather than an error.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import httpx
@@ -15,10 +16,14 @@ import respx
 
 from prodrome.clients.base import ApiClient, HttpCache, RateLimiter
 from prodrome.clients.openfda import (
+    ANALYSED_STRING_FIELDS,
     COUNT_LIMIT_ANONYMOUS,
     COUNT_LIMIT_WITH_KEY,
     EVENT_ENDPOINT,
+    FIELD_COUNTRY,
+    CountFieldError,
     OpenFdaClient,
+    validate_count_field,
 )
 from prodrome.selector import DrugSelector
 from prodrome.timeframe import Quarter
@@ -191,3 +196,72 @@ class TestLatestCompleteQuarter:
         client, transport = build(tmp_path)
         with transport:
             assert client.latest_complete_quarter().label == "2026Q2"
+
+
+class TestAnalysedFieldGuard:
+    """openFDA answers a count over an analysed string field with HTTP 500, not 400.
+
+    This is the single most expensive bug encountered while building this project. A
+    client error arriving as a server error is retried by any sane HTTP client, and the
+    retries then hide it: `count=occurcountry` failed deterministically, was absorbed
+    nine times per call, and the whole index was misdiagnosed as ~40% unreliable. The
+    guard exists so the error surfaces before a request is spent.
+    """
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "occurcountry",
+            "primarysourcecountry",
+            "patient.reaction.reactionmeddrapt",
+            "patient.drug.medicinalproduct",
+            "patient.drug.openfda.unii",
+            "patient.drug.activesubstance.activesubstancename",
+        ],
+    )
+    def test_analysed_fields_are_rejected_with_the_remedy_in_the_message(self, field: str) -> None:
+        with pytest.raises(CountFieldError, match=rf"Use {re.escape(field)}\.exact instead"):
+            validate_count_field(field)
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "occurcountry.exact",
+            "primarysourcecountry.exact",
+            "patient.reaction.reactionmeddrapt.exact",
+            # Coded and date fields are NOT analysed and must not carry .exact.
+            "primarysource.qualification",
+            "patient.patientsex",
+            "serious",
+            "receivedate",
+        ],
+    )
+    def test_countable_fields_pass_through_unchanged(self, field: str) -> None:
+        assert validate_count_field(field) == field
+
+    def test_the_country_constant_carries_exact(self) -> None:
+        """A regression guard on the exact constant that caused the outage."""
+        assert FIELD_COUNTRY == "occurcountry.exact"
+        assert FIELD_COUNTRY not in ANALYSED_STRING_FIELDS
+
+    @respx.mock
+    def test_a_bad_count_field_never_reaches_the_network(self, tmp_path: Path) -> None:
+        """The whole point: fail before spending quota on a guaranteed 500."""
+        route = respx.get(url__startswith=EVENT_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"results": []})
+        )
+        client, transport = build(tmp_path)
+        with transport, pytest.raises(CountFieldError):
+            client.stratum_counts(SELECTOR, "NAUSEA", Quarter(2024, 1), "occurcountry")
+        assert route.call_count == 0
+
+    @respx.mock
+    def test_the_diagnostics_helpers_use_countable_fields(self, tmp_path: Path) -> None:
+        """Every stratum helper must already send a countable field."""
+        respx.get(url__startswith=EVENT_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"results": [{"term": "US", "count": 5}]})
+        )
+        client, transport = build(tmp_path)
+        with transport:
+            assert client.reporter_country_counts(SELECTOR, "NAUSEA", Quarter(2024, 1)).counts
+            assert client.qualification_counts(SELECTOR, "NAUSEA", Quarter(2024, 1)).counts

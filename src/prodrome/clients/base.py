@@ -72,11 +72,10 @@ class RequestStats:
     empty_results: int = 0
     total_wait_seconds: float = 0.0
     bytes_received: int = 0
-    #: Requests that exhausted every retry. openFDA's drug/event index returns
-    #: intermittent 500s under load -- verified during development, with
-    #: drug/label, device/event and food/enforcement healthy at the same moment --
-    #: so some failures are expected on a long run and must be counted rather than
-    #: treated as fatal.
+    #: Requests that exhausted every retry. Counted rather than merely logged,
+    #: because the count is the signal that something systematic is wrong: a run
+    #: against a healthy API should end with zero, and a non-zero total on a long
+    #: backfill is worth investigating rather than shrugging at.
     failures: int = 0
 
     @property
@@ -100,17 +99,23 @@ class RequestStats:
 class CircuitBreaker:
     """Stops retrying hard when the upstream is broadly failing.
 
-    Retry policy tuned for an *occasional* failure is pathological when the failure
-    rate is high: openFDA's event index was measured failing roughly 40% of
-    requests, and nine patient attempts per request turns a ten-minute job into a
-    five-hour one while making the outage worse for everyone else.
+    A retry policy tuned for the occasional transient fault behaves pathologically
+    when failures are systematic: with nine patient attempts per request, a
+    ten-minute job becomes a multi-hour one while making the upstream's problem
+    worse for everyone else.
 
-    This tracks the outcome of the last `window` requests. Above `threshold`
-    failures, the breaker is "open" and the client cuts its retry budget to a
-    single quick attempt -- enough to pick up a recovery on the next call, cheap
-    enough that a long tail of broken requests costs minutes rather than hours.
-    It closes again as soon as successes refill the window, so recovery needs no
-    intervention.
+    This was built after exactly that happened here -- though the cause turned out
+    to be a malformed query of ours rather than an unhealthy API (see
+    ``openfda.validate_count_field``). The breaker is kept regardless, because the
+    lesson generalises: a client hammering a free public service through a sustained
+    failure is badly behaved whoever is at fault, and the cost of the guard is one
+    counter.
+
+    It tracks the outcome of the last `window` requests. Above `threshold` failures
+    the breaker is "open" and the client cuts its retry budget to a single quick
+    attempt -- enough to pick up a recovery on the next call, cheap enough that a
+    long tail of failures costs minutes rather than hours. It closes again as soon
+    as successes refill the window, so recovery needs no intervention.
     """
 
     def __init__(self, window: int = 20, threshold: float = 0.5) -> None:
