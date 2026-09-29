@@ -345,30 +345,46 @@ not known to work.
 
 ---
 
-## One debugging story worth reading
+## Two debugging stories worth reading
 
 `drug/event` appeared to fail on ~40% of requests during development, while
 `drug/label`, `device/event` and `food/enforcement` stayed healthy. That reads
 unambiguously as an unhealthy index, so the retry budget went to nine attempts and a
-circuit breaker got built.
+circuit breaker got built. Both conclusions were wrong, and there were two separate
+causes underneath.
 
-It was a one-word bug here. **openFDA answers a `count` over an analysed string field
-with HTTP 500, not 400** — so `count=occurcountry` failed every time and
-`count=occurcountry.exact` works. Mixed into a sample with healthy query shapes, a
+**One was a one-word bug here.** openFDA answers a `count` over an *analysed* string
+field with **HTTP 500, not 400** — so `count=occurcountry` failed every time and
+`count=occurcountry.exact` works. Mixed into a sample with healthy shapes, a
 deterministic failure on one shape is statistically indistinguishable from a random
-failure across all of them, and the retry machinery then hid it perfectly: every
-failure absorbed, logged as transient, retried.
+failure across all of them. The retry machinery then hid it perfectly: every failure
+absorbed, logged as transient, retried nine times. The fix is a pre-flight guard
+(`openfda.validate_count_field`) that rejects the query with the remedy in the message,
+because a client error dressed as a server error will always be retried.
 
-Three fixes, all in the code: a pre-flight guard that rejects an analysed field with an
-explanatory error rather than spending a request on a 500
-(`openfda.validate_count_field`); a failure counter surfaced in the run summary, so a
-non-zero count on a healthy API reads as a defect rather than as weather; and the
-retry budget back down to five. Every query shape the pipeline sends now succeeds
-45/45.
+**The other was load.** openFDA documents 240 requests/minute, but its *sustained*
+capacity is lower: a backfill at 200/minute drew 500s that cost three drugs from the
+run, while the identical queries at 60/minute succeeded 30/30. The documented ceiling
+behaves like a burst limit, not a throughput figure. The fix is a lower sustained rate
+(90/minute) — not more retries.
 
-The generalisable lesson is the second one: **resilience machinery obscures bugs as
-readily as it absorbs faults.** And never measure a failure rate without holding the
-query shape fixed — one shape at a time would have found this in a minute.
+And the circuit breaker, built for the wrong reason, was then built the wrong way. Its
+first version cut the retry budget when it opened, *including for essential requests*,
+which converted a recoverable slowdown into permanent data loss — that is how those
+three drugs vanished. It now imposes a cooldown that scales with the observed failure
+rate and curtails retries only for data the analysis can proceed without. The correct
+response to a load-shedding service is to slow down, not to try less hard.
+
+Three lessons, in order of how much they cost:
+
+1. **Never measure a failure rate without holding the query shape fixed.** One shape
+   at a time would have found the first bug in a minute.
+2. **Resilience machinery obscures bugs as readily as it absorbs faults.**
+   `RequestStats.failures` is now surfaced in the run summary so a non-zero count on a
+   healthy API reads as a defect rather than as weather.
+3. **Backpressure and giving up are not the same thing.** A retry budget answers "is
+   this fault transient"; a rate limit answers "am I the problem". Only the second one
+   helps when the answer is yes.
 
 ---
 

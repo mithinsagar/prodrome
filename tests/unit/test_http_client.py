@@ -370,19 +370,63 @@ class TestCircuitBreaker:
         assert route.call_count == 5
 
     @respx.mock
-    def test_an_open_breaker_cuts_the_essential_budget_too(self, tmp_path: Path) -> None:
-        """Otherwise a broadly-degraded upstream makes the run take hours to fail."""
+    def test_an_open_breaker_leaves_the_essential_budget_intact(self, tmp_path: Path) -> None:
+        """Essential requests keep the full budget while the breaker is open.
+
+        This is a regression guard on a real data-loss bug. The first version of the
+        breaker curtailed *all* retries when it opened, which during a
+        load-induced degradation dropped three drugs from a run entirely -- their
+        essential count queries gave up after two attempts and the drug was skipped.
+        The failures were recoverable; the client just stopped trying.
+        """
         route = respx.get(f"{BASE}/later").mock(return_value=httpx.Response(500))
-        with make_client(tmp_path, max_retries=8, optional_max_retries=1) as client:
-            # Prime the breaker open directly: the point under test is the retry
-            # budget it produces, not the bookkeeping that opens it.
-            client.breaker = CircuitBreaker(window=4, threshold=0.5)
+        with make_client(
+            tmp_path, max_retries=4, optional_max_retries=1, max_sleep_seconds=0.001
+        ) as client:
+            client.breaker = CircuitBreaker(window=4, threshold=0.5, cooldown_seconds=0.0)
             for _ in range(4):
                 client.breaker.record(ok=False)
             assert client.breaker.is_open
             with pytest.raises(ApiError):
                 client.get_json("later")
+        assert route.call_count == 5, "full budget: 4 retries + the initial attempt"
+
+    @respx.mock
+    def test_an_open_breaker_still_cuts_the_optional_budget(self, tmp_path: Path) -> None:
+        """Optional data does not justify waiting out a degradation."""
+        route = respx.get(f"{BASE}/later").mock(return_value=httpx.Response(500))
+        with make_client(
+            tmp_path, max_retries=8, optional_max_retries=1, max_sleep_seconds=0.001
+        ) as client:
+            client.breaker = CircuitBreaker(window=4, threshold=0.5, cooldown_seconds=0.0)
+            for _ in range(4):
+                client.breaker.record(ok=False)
+            assert client.get_json("later", on_error="skip") is None
         assert route.call_count == 2, "1 retry + the initial attempt"
+
+    def test_cooldown_scales_with_the_failure_rate(self) -> None:
+        """Backpressure, not surrender. A load-shedding service recovers when the
+        request rate drops and not at all when the client gives up sooner."""
+        closed = CircuitBreaker(window=4, threshold=0.5, cooldown_seconds=2.0)
+        assert closed.cooldown == 0.0
+
+        total = CircuitBreaker(window=4, threshold=0.5, cooldown_seconds=2.0)
+        for _ in range(4):
+            total.record(ok=False)
+        assert total.cooldown == pytest.approx(4.0)
+
+        partial = CircuitBreaker(window=4, threshold=0.5, cooldown_seconds=2.0)
+        for ok in (False, False, False, True):
+            partial.record(ok=ok)
+        assert 3.0 < partial.cooldown < 4.0, "gentler throttle for a milder degradation"
+
+        for _ in range(4):
+            partial.record(ok=True)
+        assert partial.cooldown == 0.0, "recovery needs no intervention"
+
+    def test_rejects_a_negative_cooldown(self) -> None:
+        with pytest.raises(ValueError, match="cooldown_seconds must be non-negative"):
+            CircuitBreaker(cooldown_seconds=-1.0)
 
     @respx.mock
     def test_the_breaker_records_successes_so_it_can_close(self, tmp_path: Path) -> None:

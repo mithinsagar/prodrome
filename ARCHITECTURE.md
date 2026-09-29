@@ -173,56 +173,50 @@ data can never be a version apart.
 
 ---
 
-## Handling upstream failure, and a lesson about diagnosing it
+## Handling upstream failure, and two lessons about diagnosing it
 
-Every query shape this pipeline sends now succeeds 45 times out of 45 against the
-live API. It did not start that way, and how that was misdiagnosed is worth recording.
-
-During development, `drug/event` appeared to fail on roughly 40% of requests while
+During development `drug/event` appeared to fail on roughly 40% of requests while
 `drug/label`, `device/event` and `food/enforcement` stayed healthy. That pattern reads
 unambiguously as an unhealthy index, and the response was to widen the retry budget to
-nine attempts and build a circuit breaker.
+nine attempts and build a circuit breaker. There were two separate causes and neither
+was an unhealthy index.
 
-It was a one-word bug in this repository. **openFDA answers a `count` aggregation over
-an analysed string field with HTTP 500, not 400** — so `count=occurcountry` failed
-every single time, deterministically, and `count=occurcountry.exact` works. Mixed into
-a sample with healthy query shapes, a deterministic failure on one shape is
+**Cause one: a malformed query.** openFDA answers a `count` aggregation over an
+analysed string field with HTTP 500, not 400 — so `count=occurcountry` failed every
+single time, deterministically, while `count=occurcountry.exact` works. Mixed into a
+sample with healthy query shapes, a deterministic failure on one shape is
 statistically identical to a random failure across all of them. The retry machinery
-then did its job perfectly and hid the bug: every failure was absorbed, logged as
-transient, and retried.
+then did its job perfectly and hid the bug.
 
-Three things follow, and all of them are now in the code:
+**Cause two: sustained load.** openFDA documents 240 requests/minute, but that is a
+burst ceiling rather than a throughput figure. A cold backfill at 200/minute drew 500s
+that cost three checkpoint inhibitors from the run; the identical queries issued at
+60/minute succeeded 30 times out of 30.
 
-1. **Validate before spending a request.** `openfda.validate_count_field` rejects an
-   analysed field with an explanatory error rather than letting the API answer 500.
-   A client error that arrives dressed as a server error will be retried, and
-   retrying a deterministic failure is pure waste.
-2. **Never diagnose a failure rate without holding the query shape fixed.** The
-   original measurement sampled several shapes together. One shape at a time would
-   have found this in a minute.
-3. **Resilience machinery obscures bugs as well as absorbing faults.** The retries and
-   the breaker are still here — a client hammering a free public service through a
-   sustained failure is badly behaved whoever is at fault — but `RequestStats.failures`
-   is now surfaced in the run summary precisely so that a non-zero count on a healthy
-   API is treated as a defect to investigate rather than weather to endure.
+And the circuit breaker, built for the wrong reason, was also built the wrong way. Its
+first version cut the retry budget when it opened, including for essential requests —
+which turned a recoverable slowdown into permanent data loss, and is precisely how
+those three drugs were dropped. **Backpressure and giving up are not the same thing.**
 
-The layered mechanisms remain, sized for genuine transient faults:
+The current design, with each mechanism's job stated:
 
-- **On-disk response caching.** Every successful response is kept, so re-running costs
-  only what the previous pass lost, and a full re-derivation needs no network at all.
-- **Jittered exponential backoff**, five attempts. Full jitter, so a burst of failures
-  does not produce a synchronised retry storm against the same second.
-- **Per-call retry budgets.** `on_error="skip"` marks data the analysis can proceed
-  without, and those requests get two attempts rather than five. A skipped *count*
-  would silently become a missing cell; a skipped *diagnostic* merely leaves a signal
-  unqualified, so the distinction belongs to the caller.
-- **A circuit breaker.** Above a 50% failure rate over the last 20 requests, even
-  essential requests drop to the short budget, and it closes itself once successes
-  refill the window.
+- **On-disk response caching** makes re-running the remedy: each pass costs only what
+  the previous one lost, and a full re-derivation needs no network at all.
+- **A sustained rate limit of 90/minute** answers "am I the problem". This is the
+  setting that actually prevents load-induced failure, and the one to reach for first.
+- **Jittered exponential backoff, five attempts**, answers "is this fault transient".
+  Full jitter, so a burst of failures does not produce a synchronised retry storm.
+- **A pre-flight field guard** (`openfda.validate_count_field`) answers "is this
+  request even valid", before quota is spent on a guaranteed 500.
+- **The circuit breaker** applies a cooldown scaling with the observed failure rate,
+  and curtails retries **only** for requests marked `on_error="skip"`. Essential
+  requests keep the full budget, because the alternative to waiting is a missing cell,
+  and a missing cell is indistinguishable downstream from a real zero.
+- **`RequestStats.failures`** is surfaced in the run summary, so a non-zero count
+  against a healthy API reads as a defect to investigate rather than weather to endure.
 
-A drug that fails persistently is skipped and **named** in the run summary, because a
-silently absent drug is indistinguishable from a drug with no signals in every
-downstream aggregate.
+A drug that fails persistently is skipped and **named**, because a silently absent drug
+is indistinguishable from a drug with no signals in every downstream aggregate.
 
 ## Testing strategy
 

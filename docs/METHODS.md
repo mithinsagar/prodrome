@@ -688,15 +688,15 @@ silently producing coefficients that look like a result.
    Which source was used is recorded per quarter.
 9. **The cohort is 55 drugs**, chosen for label movement. Results do not generalise to
    drugs whose labels have never changed.
- 10. **openFDA reports some client errors as HTTP 500.** Counting an *analysed* string
-     field — `count=occurcountry` rather than `count=occurcountry.exact` — returns 500,
-     not 400. A client error dressed as a server error gets retried, and the retries
-     hide it; during development this was misdiagnosed as a ~40% random failure rate on
-     the whole index. `openfda.validate_count_field` now rejects such queries before a
-     request is spent, and every shape the pipeline sends succeeds 45/45. Genuine
-     transient faults remain possible, and a run that exhausts its request budget is
-     recorded as partial rather than silently truncated. See ARCHITECTURE.md for the
-     full account, which is a better lesson than the bug.
+ 10. **Two upstream failure modes, neither of them an unreliable index.** openFDA
+     answers a `count` over an *analysed* string field with HTTP 500 rather than 400,
+     and its documented 240 requests/minute is a burst ceiling rather than sustained
+     capacity — a backfill at 200/minute lost three drugs where 60/minute succeeded
+     30/30. Both presented together as a ~40% random failure rate on the whole index.
+     Handled by a pre-flight field guard, a 90/minute sustained rate, and a circuit
+     breaker that throttles rather than curtailing retries. A run that exhausts its
+     request budget is recorded as partial rather than silently truncated. See
+     ARCHITECTURE.md; the misdiagnosis is a better lesson than the bugs.
 
 ---
 

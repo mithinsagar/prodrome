@@ -10,23 +10,28 @@ window:
   last_quarter: "2024Q4"
 
 http:
-  requests_per_minute: 120
-  timeout_seconds: 60.0
-  # openFDA's drug/event index was observed returning intermittent 500s on
-  # roughly 40% of requests while its other indexes stayed healthy. Nine
-  # attempts with jittered exponential backoff bring the per-request loss
-  # probability under 0.1%; responses are cached, so a re-run costs only what
-  # still has not succeeded.
-  # Five attempts with jittered exponential backoff. Measured against the live API,
-  # every query shape this pipeline sends succeeds 45/45, so retries exist for
-  # genuine transient faults rather than for a chronically unhealthy upstream.
+  # openFDA documents 240 requests/minute, but its SUSTAINED capacity is lower.
+  # Measured on a cold backfill: 200/minute drew HTTP 500s that cost three drugs from
+  # the run, while the identical queries issued at 60/minute succeeded 30/30. The
+  # documented ceiling behaves like a burst limit, not a throughput figure.
   #
-  # An earlier version of this file set nine attempts, on the belief that openFDA's
-  # event index failed ~40% of the time. That was wrong: the failures were entirely
-  # one malformed query of ours -- counting an analysed string field, which openFDA
-  # answers with HTTP 500 rather than 400. Retrying a deterministic client error is
-  # pure waste, so the fix was a pre-flight guard (see openfda.validate_count_field),
-  # not a bigger retry budget.
+  # 90/minute sits comfortably below where degradation began. The circuit breaker
+  # throttles further if the upstream still sheds load. A backfill is bounded by
+  # request count rather than compute, so this is the single setting that most affects
+  # how long a cold run takes -- raise it only with evidence.
+  requests_per_minute: 90
+  timeout_seconds: 60.0
+  # Five attempts with jittered exponential backoff.
+  #
+  # This setting has a history worth knowing before changing it. It was briefly nine,
+  # on the belief that openFDA's event index failed ~40% of the time at random. That
+  # belief was wrong, and wrong twice over. Most of those failures were one malformed
+  # query of ours -- counting an analysed string field, which openFDA answers with
+  # HTTP 500 rather than 400 (see openfda.validate_count_field). The rest were
+  # load-induced, and the fix for those is a lower request rate, not more attempts.
+  #
+  # Neither cause is helped by a bigger retry budget, and a bigger budget made both
+  # harder to see. Five attempts is for genuine transient faults.
   max_retries: 5
   backoff_base_seconds: 1.5
   max_sleep_seconds: 30.0

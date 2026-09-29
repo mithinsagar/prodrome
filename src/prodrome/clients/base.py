@@ -97,32 +97,47 @@ class RequestStats:
 
 
 class CircuitBreaker:
-    """Stops retrying hard when the upstream is broadly failing.
+    """Detects a degraded upstream and throttles, rather than giving up.
 
-    A retry policy tuned for the occasional transient fault behaves pathologically
-    when failures are systematic: with nine patient attempts per request, a
-    ten-minute job becomes a multi-hour one while making the upstream's problem
-    worse for everyone else.
+    What this is for, precisely, because the first version got it wrong.
 
-    This was built after exactly that happened here -- though the cause turned out
-    to be a malformed query of ours rather than an unhealthy API (see
-    ``openfda.validate_count_field``). The breaker is kept regardless, because the
-    lesson generalises: a client hammering a free public service through a sustained
-    failure is badly behaved whoever is at fault, and the cost of the guard is one
-    counter.
+    openFDA's documented rate limit is 240 requests/minute, but its *sustained*
+    capacity is lower. Measured here: a backfill running at 200/minute drew HTTP
+    500s that killed whole drugs, while the identical queries issued at 1/second
+    succeeded 30 times out of 30. The failures were load-induced, not faults.
 
-    It tracks the outcome of the last `window` requests. Above `threshold` failures
-    the breaker is "open" and the client cuts its retry budget to a single quick
-    attempt -- enough to pick up a recovery on the next call, cheap enough that a
-    long tail of failures costs minutes rather than hours. It closes again as soon
-    as successes refill the window, so recovery needs no intervention.
+    The correct response to that is to **slow down**, not to try less hard. The
+    first version of this class cut the retry budget when it opened -- including for
+    essential requests -- which converted a recoverable slowdown into permanent data
+    loss: three checkpoint inhibitors were dropped from a run entirely because their
+    retries were curtailed mid-degradation.
+
+    So an open breaker now does two things:
+
+    * imposes an additional cooldown before each request, which is what actually
+      lets a load-shedding upstream recover;
+    * curtails retries **only** for requests whose data is optional. Essential
+      requests keep the full budget, because the alternative to waiting is a missing
+      cell, and a missing cell is indistinguishable downstream from a real zero.
+
+    It closes as soon as successes refill the window, so recovery needs no
+    intervention.
     """
 
-    def __init__(self, window: int = 20, threshold: float = 0.5) -> None:
+    def __init__(
+        self,
+        window: int = 20,
+        threshold: float = 0.5,
+        *,
+        cooldown_seconds: float = 2.0,
+    ) -> None:
         if not 0 < threshold <= 1:
             raise ValueError(f"threshold must be in (0, 1], got {threshold}")
+        if cooldown_seconds < 0:
+            raise ValueError(f"cooldown_seconds must be non-negative, got {cooldown_seconds}")
         self.window = window
         self.threshold = threshold
+        self.cooldown_seconds = cooldown_seconds
         self._outcomes: deque[bool] = deque(maxlen=window)
         self._lock = threading.Lock()
 
@@ -148,6 +163,17 @@ class CircuitBreaker:
             if len(self._outcomes) < self.window:
                 return False
         return self.failure_rate >= self.threshold
+
+    @property
+    def cooldown(self) -> float:
+        """Extra delay to apply before the next request, in seconds.
+
+        Scales with the observed failure rate so a mildly degraded upstream is
+        throttled gently and a badly degraded one firmly.
+        """
+        if not self.is_open:
+            return 0.0
+        return self.cooldown_seconds * (1.0 + self.failure_rate)
 
 
 class RateLimiter:
@@ -371,19 +397,33 @@ class ApiClient:
     def _retry_budget(self, on_error: str) -> int:
         """How many retries this request gets.
 
-        Optional data gets a small budget always; essential data gets the full
-        budget until the circuit breaker opens, after which it is cut too. Without
-        the cut, a broadly-degraded upstream makes the run take hours to fail.
+        Optional data always gets the short budget. Essential data always gets the
+        full one -- including while the breaker is open, because the failures the
+        breaker detects are typically load-induced and therefore recoverable, and the
+        alternative to waiting is a permanently missing cell. An earlier version cut
+        this budget too and silently dropped three drugs from a run.
+
+        Backpressure is applied as delay instead; see :meth:`_apply_backpressure`.
         """
         if on_error == "skip":
             return min(self.optional_max_retries, self.max_retries)
-        if self.breaker.is_open:
-            logger.debug(
-                "circuit breaker open (failure rate %.0f%%); reducing the retry budget",
-                self.breaker.failure_rate * 100,
-            )
-            return min(self.optional_max_retries, self.max_retries)
         return self.max_retries
+
+    def _apply_backpressure(self) -> None:
+        """Slow down while the upstream looks degraded.
+
+        This is the mechanism that actually helps: a service shedding load under a
+        sustained request rate recovers when the rate drops, and recovers not at all
+        when the client merely gives up sooner.
+        """
+        cooldown = self.breaker.cooldown
+        if cooldown > 0:
+            logger.debug(
+                "upstream degraded (%.0f%% failures); backing off %.1fs",
+                self.breaker.failure_rate * 100,
+                cooldown,
+            )
+            self._sleep(cooldown)
 
     def _backoff(self, attempt: int) -> float:
         """Exponential backoff with full jitter.
@@ -455,6 +495,7 @@ class ApiClient:
             # The limiter blocks internally; record what it cost us so the run
             # manifest shows how much of the wall clock was rate limiting.
             self.stats.total_wait_seconds += self.limiter.acquire()
+            self._apply_backpressure()
             self.stats.requests += 1
             try:
                 response = self._client.get(url, params=send_params)
@@ -566,12 +607,14 @@ class ApiClient:
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             self.stats.total_wait_seconds += self.limiter.acquire()
+            self._apply_backpressure()
             self.stats.requests += 1
             try:
                 response = self._client.get(url, params=send_params)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc
                 self.stats.retries += 1
+                self.breaker.record(ok=False)
                 self._sleep(self._backoff(attempt))
                 continue
 

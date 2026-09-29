@@ -83,23 +83,31 @@ which is the transition the whole project is calibrated against.
 
 ## If the API starts failing
 
-Every query shape the pipeline sends succeeds 45/45 against the live API, so a wave of
-failures is much more likely to be a bug here than an outage there. That is not a
-guess: the one sustained "outage" during development was `count=occurcountry` without
-`.exact`, which openFDA answers with **HTTP 500 rather than 400** — a client error
-disguised as a server error, which the retry machinery then absorbed and hid.
+Two causes have been seen, and neither is fixed by a bigger retry budget.
 
-So before widening a retry budget:
+**A malformed query.** openFDA answers a `count` over an *analysed* string field with
+**HTTP 500 rather than 400** — a client error disguised as a server error, which the
+retry machinery absorbs and hides. `openfda.ANALYSED_STRING_FIELDS` lists the fields
+needing `.exact`; `validate_count_field` enforces it. Coded and date fields
+(`primarysource.qualification`, `patient.patientsex`, `serious`, `receivedate`) must
+*not* carry it.
+
+**Sustained load.** openFDA documents 240 requests/minute, but that is a burst ceiling.
+A backfill at 200/minute drew 500s that cost three drugs; the same queries at 60/minute
+succeeded 30/30. If failures appear during a long run, lower
+`http.requests_per_minute` before touching anything else.
+
+So, in order:
 
 1. **Hold the query shape fixed and repeat it.** A deterministic failure on one shape
-   looks exactly like a random failure across many when the shapes are sampled
-   together. That is precisely the mistake that was made here.
-2. **Check whether a counted field is analysed.** `openfda.ANALYSED_STRING_FIELDS`
-   lists the ones needing `.exact`; `validate_count_field` enforces it. Coded and date
-   fields (`primarysource.qualification`, `patient.patientsex`, `serious`,
-   `receivedate`) must *not* carry it.
-3. **Look at `RequestStats.failures`** in the run summary. A healthy run ends at zero.
-   A non-zero count is a defect to investigate, not weather to endure.
+   looks exactly like a random failure across many when shapes are sampled together.
+   That is precisely the mistake made here, and it cost hours.
+2. **Check whether a counted field is analysed.** See above.
+3. **Lower the request rate.** Backpressure and giving up are not the same thing: a
+   retry budget answers "is this fault transient", a rate limit answers "am I the
+   problem".
+4. **Look at `RequestStats.failures`** in the run summary. A healthy run ends at zero;
+   a non-zero count is a defect to investigate, not weather to endure.
 
 Responses are cached on disk, so re-running a stage costs only what the previous pass
 did not get. `prodrome status` shows the request accounting.
